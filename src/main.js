@@ -15,6 +15,7 @@ const synchronization = new UsageSynchronization({
 function getCostSettingsStore() {
   if (!costSettingsStore) {
     costSettingsStore = new CostSettingsStore({ configDir: app.getPath("userData") });
+    reader.setCostSettingsProvider(() => costSettingsStore.getSettings());
   }
   return costSettingsStore;
 }
@@ -80,6 +81,7 @@ ipcMain.handle("cost:getSettings", () => getCostSettingsStore().getSettings());
 ipcMain.handle("cost:saveSettings", (_event, settings) => {
   const saved = getCostSettingsStore().saveSettings(settings);
   publishCostSettings(saved);
+  synchronization.syncIncremental();
   return saved;
 });
 
@@ -89,6 +91,7 @@ ipcMain.handle("usage:openCodexHome", async () => {
 });
 
 app.whenReady().then(() => {
+  getCostSettingsStore();
   createWindow();
 
   app.on("activate", () => {

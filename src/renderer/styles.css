@@ -537,6 +537,74 @@ h1 {
   text-align: right;
 }
 
+.cost-estimate {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(240, 207, 100, 0.24);
+  border-radius: 8px;
+  background: rgba(240, 207, 100, 0.055);
+}
+
+.cost-estimate.is-unavailable {
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.cost-estimate-head,
+.cost-project-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cost-estimate-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.cost-estimate-main {
+  margin-top: 2px;
+  color: var(--amber);
+  font-family: var(--font-number);
+  font-size: 18px;
+  font-weight: 720;
+  line-height: 1;
+}
+
+.cost-estimate-sub {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 560;
+  text-align: right;
+}
+
+.cost-project-list {
+  display: grid;
+  gap: 4px;
+}
+
+.cost-project-row {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.cost-project-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cost-project-row strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 .split-grid {
   display: grid;
   grid-template-columns: 1.15fr 0.85fr;

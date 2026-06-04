@@ -10,6 +10,7 @@ const reader = new UsageReader();
 const costSettingsStore = new CostSettingsStore({
   configDir: fs.mkdtempSync(path.join(app.getPath("temp"), "codex-panel-screenshot-config-"))
 });
+reader.setCostSettingsProvider(() => costSettingsStore.getSettings());
 const outputPath = process.env.CODEX_PANEL_SCREENSHOT_PATH ||
   path.join(__dirname, "..", "artifacts", "codex-panel.png");
 const synchronization = new UsageSynchronization({
@@ -41,7 +42,11 @@ ipcMain.handle("usage:getConfig", () => ({
   platform: process.platform
 }));
 ipcMain.handle("cost:getSettings", () => costSettingsStore.getSettings());
-ipcMain.handle("cost:saveSettings", (_event, settings) => costSettingsStore.saveSettings(settings));
+ipcMain.handle("cost:saveSettings", (_event, settings) => {
+  const saved = costSettingsStore.saveSettings(settings);
+  synchronization.syncIncremental();
+  return saved;
+});
 ipcMain.handle("usage:openCodexHome", () => ({ ok: true, message: "" }));
 
 app.whenReady().then(async () => {
@@ -74,6 +79,7 @@ app.whenReady().then(async () => {
       statusText,
       showsNoCostPackage: appText.includes("未配置成本套餐"),
       showsTokenBoard: appText.includes("Token 消耗看板"),
+      showsUnavailableCost: Boolean(document.querySelector(".cost-estimate.is-unavailable")),
       appTextLength: appText.length,
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
@@ -90,6 +96,7 @@ app.whenReady().then(async () => {
   assert(uiState.appTextLength > 80, "dashboard should not be blank");
   assert.equal(uiState.showsNoCostPackage, true, "dashboard should show the no-cost-package state");
   assert.equal(uiState.showsTokenBoard, true, "token dashboard should remain visible without a cost package");
+  assert.equal(uiState.showsUnavailableCost, true, "cost estimate should be unavailable without an active package");
   assert(uiState.scrollWidth <= uiState.viewportWidth, "dashboard should not have a horizontal scrollbar");
   assert(uiState.scrollHeight <= uiState.viewportHeight, "dashboard should not have a vertical scrollbar");
 
@@ -215,6 +222,8 @@ app.whenReady().then(async () => {
       invalidCycleRejected: invalidCycleMessage.length > 0,
       customCyclePublished: appTextAfterCustomCycle.includes("自定义") && appTextAfterCustomCycle.includes("2026-06-30") && customCycleSummaryText.includes("2026-06-30"),
       naturalMonthVisible: appText.includes("自然月") && cycleSummaryText.includes("自然月"),
+      costAllocationVisible: Boolean(document.querySelector(".cost-estimate:not(.is-unavailable)")),
+      projectAllocationVisible: document.querySelectorAll(".cost-project-row").length > 0,
       overlayVisible: Boolean(overlay && !overlay.hidden && overlay.offsetHeight > 0),
       listText,
       formName: document.getElementById("costPackageName")?.value || "",
@@ -228,8 +237,11 @@ app.whenReady().then(async () => {
   assert.equal(packageUiState.invalidCycleRejected, true, "invalid cost cycle dates should show clear feedback");
   assert.equal(packageUiState.customCyclePublished, true, "custom cost cycle date changes should publish visible app state without saving a package");
   assert.equal(packageUiState.naturalMonthVisible, true, "natural-month cycle should update visible app state without restart");
+  assert.equal(packageUiState.costAllocationVisible, true, "active package should show an available cost allocation");
+  assert.equal(packageUiState.projectAllocationVisible, true, "cost allocation should include project rows");
   assert.equal(packageUiState.overlayVisible, true, "cost settings should remain visible for final screenshot");
 
+  await new Promise((resolve) => setTimeout(resolve, 250));
   window.webContents.send("usage:syncProgress", {
     state: "idle",
     phase: "idle",
@@ -238,7 +250,7 @@ app.whenReady().then(async () => {
     message: "Temporary read errors.",
     errorCount: 2
   });
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  await new Promise((resolve) => setTimeout(resolve, 120));
 
   const degradedState = await window.webContents.executeJavaScript(`(() => {
     const progressText = document.getElementById("syncProgressMessage")?.textContent?.trim() || "";
