@@ -9,9 +9,9 @@ const syncProgressBarNode = document.getElementById("syncProgressBar");
 
 const palette = ["#f0cf64", "#7bdde4", "#a994f1", "#91d4bd", "#ed82a4", "#9ea8bd"];
 const hasBridge = Boolean(window.codexPanel);
-let refreshTimer = null;
 let latestSnapshot = null;
 let manualRefreshRunning = false;
+let unsubscribeSnapshot = null;
 let unsubscribeSyncProgress = null;
 
 function escapeHtml(value) {
@@ -423,21 +423,29 @@ function buildMockSnapshot() {
   };
 }
 
-async function loadSnapshot() {
+function renderPushedSnapshot(snapshot) {
+  latestSnapshot = snapshot;
+  renderSnapshot(snapshot);
+  if (hasBridge) {
+    renderLiveStatus(snapshot);
+  } else {
+    liveStatusNode.textContent = "预览";
+    liveStatusNode.classList.remove("error");
+  }
+}
+
+async function hydrateSnapshot() {
   if (manualRefreshRunning) return;
 
   try {
-    const snapshot = hasBridge ? await window.codexPanel.getSnapshot() : buildMockSnapshot();
-    latestSnapshot = snapshot;
-    renderSnapshot(snapshot);
-    if (hasBridge) {
-      renderLiveStatus(snapshot);
-    } else {
-      liveStatusNode.textContent = "预览";
-      liveStatusNode.classList.remove("error");
-    }
+    const snapshot = hasBridge && typeof window.codexPanel.getSnapshot === "function"
+      ? await window.codexPanel.getSnapshot()
+      : buildMockSnapshot();
+    if (manualRefreshRunning) return;
+    renderPushedSnapshot(snapshot);
+    renderSyncProgress(snapshot.sync);
   } catch (error) {
-    liveStatusNode.textContent = "错误";
+    liveStatusNode.textContent = "读取失败";
     liveStatusNode.classList.add("error");
     if (!latestSnapshot) {
       appNode.innerHTML = `
@@ -466,15 +474,8 @@ async function runManualRefresh() {
 
   try {
     const snapshot = hasBridge ? await window.codexPanel.refreshFull() : buildMockSnapshot();
-    latestSnapshot = snapshot;
-    renderSnapshot(snapshot);
+    renderPushedSnapshot(snapshot);
     renderSyncProgress(snapshot.sync);
-    if (hasBridge) {
-      renderLiveStatus(snapshot);
-    } else {
-      liveStatusNode.textContent = "预览";
-      liveStatusNode.classList.remove("error");
-    }
   } catch (error) {
     liveStatusNode.textContent = "同步失败";
     liveStatusNode.classList.add("error");
@@ -510,10 +511,12 @@ if (hasBridge && typeof window.codexPanel.onSyncProgress === "function") {
   unsubscribeSyncProgress = window.codexPanel.onSyncProgress(renderSyncProgress);
 }
 
-loadSnapshot();
-refreshTimer = window.setInterval(loadSnapshot, 2500);
+if (hasBridge && typeof window.codexPanel.onSnapshot === "function") {
+  unsubscribeSnapshot = window.codexPanel.onSnapshot(renderPushedSnapshot);
+}
+hydrateSnapshot();
 
 window.addEventListener("beforeunload", () => {
-  if (refreshTimer) window.clearInterval(refreshTimer);
+  if (unsubscribeSnapshot) unsubscribeSnapshot();
   if (unsubscribeSyncProgress) unsubscribeSyncProgress();
 });
