@@ -102,6 +102,8 @@ app.whenReady().then(async () => {
       visible: Boolean(overlay && !overlay.hidden && overlay.offsetHeight > 0),
       hasPackageList: Boolean(document.getElementById("costPackageList")),
       hasCurrencyInput: Boolean(document.getElementById("costPackageCurrency")),
+      hasCycleMode: Boolean(document.getElementById("costCycleModeCustom") && document.getElementById("costCycleModeNaturalMonth")),
+      hasCycleDates: Boolean(document.getElementById("costCycleStartDate") && document.getElementById("costCycleEndDate")),
       appTextLength: appText.length
     };
   })()`);
@@ -109,10 +111,20 @@ app.whenReady().then(async () => {
   assert.equal(settingsUiState.visible, true, "cost settings should open from the toolbar");
   assert.equal(settingsUiState.hasPackageList, true, "cost settings should manage a package list");
   assert.equal(settingsUiState.hasCurrencyInput, true, "cost settings should allow editing package currency");
+  assert.equal(settingsUiState.hasCycleMode, true, "cost settings should show cost cycle mode controls");
+  assert.equal(settingsUiState.hasCycleDates, true, "cost settings should allow editing custom cost cycle dates");
   assert(settingsUiState.appTextLength > 80, "token dashboard should remain rendered while settings are open");
 
   const packageUiState = await window.webContents.executeJavaScript(`(async () => {
     const wait = (ms = 180) => new Promise((resolve) => setTimeout(resolve, ms));
+    const waitFor = async (label, predicate, timeoutMs = 2400) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (predicate()) return;
+        await wait(60);
+      }
+      throw new Error(label);
+    };
     const submit = async () => {
       document.getElementById("costSettingsForm").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       await wait();
@@ -121,6 +133,12 @@ app.whenReady().then(async () => {
       const node = document.getElementById(id);
       node.value = value;
       node.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    const changeValue = async (id, value) => {
+      const node = document.getElementById(id);
+      node.value = value;
+      node.dispatchEvent(new Event("change", { bubbles: true }));
+      await wait();
     };
 
     setValue("costPackageName", "5x");
@@ -158,16 +176,45 @@ app.whenReady().then(async () => {
 
     setValue("costPackageAmount", "-1");
     await submit();
+    const invalidPackageMessage = document.getElementById("costSettingsMessage")?.innerText || "";
+
+    setValue("costPackageAmount", "790");
+    document.getElementById("costCycleStartDate").value = "2026-07-01";
+    document.getElementById("costCycleEndDate").value = "2026-06-01";
+    document.getElementById("costCycleEndDate").dispatchEvent(new Event("change", { bubbles: true }));
+    await waitFor("invalid cost cycle feedback", () => (
+      (document.getElementById("costSettingsMessage")?.innerText || "").length > 0
+    ));
+    const invalidCycleMessage = document.getElementById("costSettingsMessage")?.innerText || "";
+
+    document.getElementById("costCycleStartDate").value = "2026-06-01";
+    await changeValue("costCycleEndDate", "2026-06-30");
+    await waitFor("custom cost cycle publish", () => (
+      (document.getElementById("app")?.innerText || "").includes("2026-06-30") &&
+      (document.getElementById("costCycleSummary")?.innerText || "").includes("2026-06-30")
+    ));
+    const appTextAfterCustomCycle = document.getElementById("app")?.innerText || "";
+    const customCycleSummaryText = document.getElementById("costCycleSummary")?.innerText || "";
+
+    document.getElementById("costCycleModeNaturalMonth").click();
+    await waitFor("natural-month cost cycle publish", () => (
+      (document.getElementById("app")?.innerText || "").includes("自然月") &&
+      (document.getElementById("costCycleSummary")?.innerText || "").includes("自然月")
+    ));
 
     const appText = document.getElementById("app")?.innerText || "";
     const listText = document.getElementById("costPackageList")?.innerText || "";
     const messageText = document.getElementById("costSettingsMessage")?.innerText || "";
+    const cycleSummaryText = document.getElementById("costCycleSummary")?.innerText || "";
     const overlay = document.getElementById("costSettingsOverlay");
     return {
       activeSummaryVisible: appText.includes("20x Pro"),
       inactiveEditPreservedActive: appTextAfterInactiveEdit.includes("20x Pro"),
       listShowsBothPackages: listText.includes("5x") && listText.includes("20x Pro"),
-      invalidInputRejected: messageText.length > 0 && appText.includes("20x Pro"),
+      invalidInputRejected: invalidPackageMessage.length > 0 && appText.includes("20x Pro"),
+      invalidCycleRejected: invalidCycleMessage.length > 0,
+      customCyclePublished: appTextAfterCustomCycle.includes("自定义") && appTextAfterCustomCycle.includes("2026-06-30") && customCycleSummaryText.includes("2026-06-30"),
+      naturalMonthVisible: appText.includes("自然月") && cycleSummaryText.includes("自然月"),
       overlayVisible: Boolean(overlay && !overlay.hidden && overlay.offsetHeight > 0),
       listText,
       formName: document.getElementById("costPackageName")?.value || "",
@@ -178,6 +225,9 @@ app.whenReady().then(async () => {
   assert.equal(packageUiState.inactiveEditPreservedActive, true, "editing an inactive package should not switch the active package");
   assert.equal(packageUiState.listShowsBothPackages, true, "settings should show created and edited packages");
   assert.equal(packageUiState.invalidInputRejected, true, "invalid package input should not corrupt saved settings");
+  assert.equal(packageUiState.invalidCycleRejected, true, "invalid cost cycle dates should show clear feedback");
+  assert.equal(packageUiState.customCyclePublished, true, "custom cost cycle date changes should publish visible app state without saving a package");
+  assert.equal(packageUiState.naturalMonthVisible, true, "natural-month cycle should update visible app state without restart");
   assert.equal(packageUiState.overlayVisible, true, "cost settings should remain visible for final screenshot");
 
   window.webContents.send("usage:syncProgress", {
@@ -188,20 +238,33 @@ app.whenReady().then(async () => {
     message: "Temporary read errors.",
     errorCount: 2
   });
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await new Promise((resolve) => setTimeout(resolve, 400));
 
   const degradedState = await window.webContents.executeJavaScript(`(() => {
     const progressText = document.getElementById("syncProgressMessage")?.textContent?.trim() || "";
     const statusText = document.getElementById("liveStatus")?.textContent?.trim() || "";
     const appText = document.getElementById("app")?.innerText?.trim() || "";
-    return { progressText, statusText, appTextLength: appText.length };
+    const cycleSummaryText = document.getElementById("costCycleSummary")?.innerText?.trim() || "";
+    return {
+      progressText,
+      statusText,
+      appTextLength: appText.length,
+      costCycleStillVisible: appText.includes("自然月"),
+      cycleSummaryStillVisible: cycleSummaryText.includes("自然月"),
+      naturalMonthModeChecked: Boolean(document.getElementById("costCycleModeNaturalMonth")?.checked)
+    };
   })()`);
 
   assert.match(degradedState.progressText, /降级|重试/, "temporary errors should be inline degraded status");
   assert.match(degradedState.statusText, /降级|重试/, "status pill should show degraded retry state");
   assert(degradedState.appTextLength > 80, "existing snapshot should remain visible during degraded state");
+  assert.equal(degradedState.costCycleStillVisible, true, "latest cost cycle should survive concurrent snapshot refreshes");
+  assert.equal(degradedState.cycleSummaryStillVisible, true, "cost cycle form summary should stay on the latest cycle");
+  assert.equal(degradedState.naturalMonthModeChecked, true, "cost cycle form mode should stay on the latest cycle");
 
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  await window.webContents.executeJavaScript(`new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  })`);
   const image = await window.webContents.capturePage();
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, image.toPNG());

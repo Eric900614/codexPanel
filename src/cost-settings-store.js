@@ -4,6 +4,7 @@ const path = require("node:path");
 const COST_SETTINGS_FILE_NAME = "cost-settings.json";
 
 function defaultCostSettings() {
+  const costCycle = defaultCostCycle();
   return {
     version: 1,
     configured: false,
@@ -11,7 +12,75 @@ function defaultCostSettings() {
     activePackageId: "",
     activePackage: null,
     costPackage: null,
+    costCycle,
     updatedAt: null
+  };
+}
+
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function startOfCurrentMonth(now = new Date()) {
+  return formatLocalDate(new Date(now.getFullYear(), now.getMonth(), 1));
+}
+
+function endOfCurrentMonth(now = new Date()) {
+  return formatLocalDate(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+}
+
+function defaultCostCycle() {
+  const now = new Date();
+  const startDate = startOfCurrentMonth(now);
+  const endDate = formatLocalDate(now);
+  return {
+    mode: "custom",
+    startDate,
+    endDate,
+    effectiveStartDate: startDate,
+    effectiveEndDate: endDate
+  };
+}
+
+function isIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return false;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isFinite(date.getTime()) && formatLocalDate(date) === value;
+}
+
+function normalizeCostCycle(costCycle) {
+  if (!costCycle) return defaultCostCycle();
+
+  const mode = costCycle.mode === "naturalMonth" ? "naturalMonth" : "custom";
+  if (mode === "naturalMonth") {
+    const now = new Date();
+    return {
+      mode,
+      startDate: "",
+      endDate: "",
+      effectiveStartDate: startOfCurrentMonth(now),
+      effectiveEndDate: endOfCurrentMonth(now)
+    };
+  }
+
+  const startDate = String(costCycle.startDate || "").trim();
+  const endDate = String(costCycle.endDate || "").trim();
+  if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
+    throw new Error("Cost cycle dates must use YYYY-MM-DD.");
+  }
+  if (startDate > endDate) {
+    throw new Error("Cost cycle end date must be on or after the start date.");
+  }
+
+  return {
+    mode,
+    startDate,
+    endDate,
+    effectiveStartDate: startDate,
+    effectiveEndDate: endDate
   };
 }
 
@@ -61,6 +130,7 @@ function normalizeCostPackage(costPackage, index = 0) {
 }
 
 function normalizeCostSettings(settings) {
+  const costCycle = normalizeCostCycle(settings?.costCycle);
   const sourcePackages = Array.isArray(settings?.packages)
     ? settings.packages
     : (settings?.costPackage ? [settings.costPackage] : []);
@@ -98,6 +168,7 @@ function normalizeCostSettings(settings) {
     activePackageId: activePackage?.id || "",
     activePackage,
     costPackage,
+    costCycle,
     updatedAt: settings?.updatedAt || (costPackage ? new Date().toISOString() : null)
   };
 }
@@ -140,5 +211,6 @@ class CostSettingsStore {
 module.exports = {
   CostSettingsStore,
   defaultCostSettings,
-  normalizeCostSettings
+  normalizeCostSettings,
+  normalizeCostCycle
 };

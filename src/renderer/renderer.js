@@ -13,6 +13,11 @@ const costPackageIdInput = document.getElementById("costPackageId");
 const costPackageNameInput = document.getElementById("costPackageName");
 const costPackageAmountInput = document.getElementById("costPackageAmount");
 const costPackageCurrencyInput = document.getElementById("costPackageCurrency");
+const costCycleModeCustomInput = document.getElementById("costCycleModeCustom");
+const costCycleModeNaturalMonthInput = document.getElementById("costCycleModeNaturalMonth");
+const costCycleStartDateInput = document.getElementById("costCycleStartDate");
+const costCycleEndDateInput = document.getElementById("costCycleEndDate");
+const costCycleSummaryNode = document.getElementById("costCycleSummary");
 const costSettingsMessageNode = document.getElementById("costSettingsMessage");
 const syncProgressNode = document.getElementById("syncProgress");
 const syncProgressMessageNode = document.getElementById("syncProgressMessage");
@@ -27,6 +32,8 @@ let manualRefreshRunning = false;
 let unsubscribeSnapshot = null;
 let unsubscribeSyncProgress = null;
 let unsubscribeCostSettings = null;
+let costSettingsSaveSequence = 0;
+const staleCostSettingsResponses = new WeakSet();
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -52,12 +59,22 @@ function formatRaw(value) {
 }
 
 function buildUnconfiguredCostSettings() {
+  const now = new Date();
+  const startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const endDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   return {
     version: 1,
     configured: false,
     packages: [],
     activePackageId: "",
     activePackage: null,
+    costCycle: {
+      mode: "custom",
+      startDate,
+      endDate,
+      effectiveStartDate: startDate,
+      effectiveEndDate: endDate
+    },
     costPackage: null,
     updatedAt: null
   };
@@ -65,6 +82,15 @@ function buildUnconfiguredCostSettings() {
 
 function isCostPackageConfigured(settings) {
   return Boolean(settings?.configured && (settings.activePackage || settings.costPackage));
+}
+
+function costSettingsUpdatedAtMs(settings) {
+  const time = Date.parse(settings?.updatedAt || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
+function shouldApplyLoadedCostSettings(settings) {
+  return costSettingsUpdatedAtMs(settings) >= costSettingsUpdatedAtMs(latestCostSettings);
 }
 
 function formatCurrency(value, currency = "CNY") {
@@ -89,6 +115,12 @@ function isSupportedCurrency(currency) {
   } catch {
     return false;
   }
+}
+
+function formatCycleRange(costCycle) {
+  if (!costCycle) return "";
+  const label = costCycle.mode === "naturalMonth" ? "自然月" : "自定义";
+  return `${label} ${costCycle.effectiveStartDate || costCycle.startDate || "--"} 至 ${costCycle.effectiveEndDate || costCycle.endDate || "--"}`;
 }
 
 function progressPercent(progress) {
@@ -285,12 +317,12 @@ function renderMetricCards(snapshot) {
 
 function costSummaryText(costSettings) {
   if (!isCostPackageConfigured(costSettings)) {
-    return "未配置成本套餐";
+    return `未配置成本套餐 · ${formatCycleRange(costSettings.costCycle)}`;
   }
 
   const costPackage = costSettings.activePackage || costSettings.costPackage;
   const amount = costPackage.amount ?? costPackage.amountCny;
-  return `${costPackage.name} ${formatCurrency(amount, costPackage.currency || "CNY")}`;
+  return `${costPackage.name} ${formatCurrency(amount, costPackage.currency || "CNY")} · ${formatCycleRange(costSettings.costCycle)}`;
 }
 
 function renderTokenBoard(snapshot, costSettings = latestCostSettings) {
@@ -531,13 +563,18 @@ function renderPushedSnapshot(snapshot) {
 }
 
 function renderCostSettings(settings) {
-  latestCostSettings = settings || buildUnconfiguredCostSettings();
+  const nextCostSettings = settings || buildUnconfiguredCostSettings();
+  if (settings && staleCostSettingsResponses.has(settings)) return false;
+  if (!shouldApplyLoadedCostSettings(nextCostSettings)) return false;
+  latestCostSettings = nextCostSettings;
   if (latestSnapshot) {
     renderSnapshot(latestSnapshot);
   }
   if (costSettingsOverlay && !costSettingsOverlay.hidden) {
     renderCostPackageList();
+    fillCostCycleForm(latestCostSettings.costCycle);
   }
+  return true;
 }
 
 async function loadCostSettings() {
@@ -558,7 +595,9 @@ async function hydrateSnapshot() {
         : buildMockSnapshot()
     ]);
     if (manualRefreshRunning) return;
-    latestCostSettings = costSettings || buildUnconfiguredCostSettings();
+    if (shouldApplyLoadedCostSettings(costSettings)) {
+      latestCostSettings = costSettings || buildUnconfiguredCostSettings();
+    }
     renderPushedSnapshot(snapshot);
     renderSyncProgress(snapshot.sync);
   } catch (error) {
@@ -621,6 +660,7 @@ async function runManualRefresh() {
 function openCostSettings() {
   if (!costSettingsOverlay) return;
   renderCostPackageList();
+  fillCostCycleForm(latestCostSettings.costCycle);
   fillCostPackageForm(latestCostSettings?.activePackage || latestCostSettings?.costPackage || null);
   costSettingsMessageNode.textContent = "";
   costSettingsOverlay.hidden = false;
@@ -633,18 +673,26 @@ function closeCostSettings() {
 }
 
 async function saveCostSettings(settings) {
+  const sequence = ++costSettingsSaveSequence;
+  let saved;
   if (hasBridge && typeof window.codexPanel.saveCostSettings === "function") {
-    return window.codexPanel.saveCostSettings(settings);
+    saved = await window.codexPanel.saveCostSettings(settings);
+  } else {
+    saved = {
+      version: 1,
+      configured: Boolean(settings.activePackageId),
+      packages: settings.packages || [],
+      activePackageId: settings.activePackageId || "",
+      activePackage: (settings.packages || []).find((costPackage) => costPackage.id === settings.activePackageId) || null,
+      costCycle: settings.costCycle || latestCostSettings.costCycle,
+      costPackage: null,
+      updatedAt: new Date().toISOString()
+    };
   }
-  return {
-    version: 1,
-    configured: Boolean(settings.activePackageId),
-    packages: settings.packages || [],
-    activePackageId: settings.activePackageId || "",
-    activePackage: (settings.packages || []).find((costPackage) => costPackage.id === settings.activePackageId) || null,
-    costPackage: null,
-    updatedAt: new Date().toISOString()
-  };
+  if (sequence !== costSettingsSaveSequence && saved && typeof saved === "object") {
+    staleCostSettingsResponses.add(saved);
+  }
+  return saved;
 }
 
 function currentCostPackages() {
@@ -666,6 +714,61 @@ function fillCostPackageForm(costPackage) {
   costPackageAmountInput.value = costPackage?.amount ?? costPackage?.amountCny ?? "";
   costPackageCurrencyInput.value = costPackage?.currency || "CNY";
   costSettingsMessageNode.textContent = "";
+}
+
+function fillCostCycleForm(costCycle = latestCostSettings.costCycle) {
+  const cycle = costCycle || buildUnconfiguredCostSettings().costCycle;
+  const isNaturalMonth = cycle.mode === "naturalMonth";
+  costCycleModeCustomInput.checked = !isNaturalMonth;
+  costCycleModeNaturalMonthInput.checked = isNaturalMonth;
+  costCycleStartDateInput.value = cycle.startDate || cycle.effectiveStartDate || "";
+  costCycleEndDateInput.value = cycle.endDate || cycle.effectiveEndDate || "";
+  costCycleStartDateInput.disabled = isNaturalMonth;
+  costCycleEndDateInput.disabled = isNaturalMonth;
+  costCycleSummaryNode.textContent = formatCycleRange(cycle);
+}
+
+function readCostCycleFromForm() {
+  const mode = costCycleModeNaturalMonthInput.checked ? "naturalMonth" : "custom";
+  if (mode === "naturalMonth") {
+    return { mode };
+  }
+
+  const fallbackCycle = latestCostSettings.costCycle || buildUnconfiguredCostSettings().costCycle;
+  const startDate = costCycleStartDateInput.value || fallbackCycle.effectiveStartDate || fallbackCycle.startDate;
+  const endDate = costCycleEndDateInput.value || fallbackCycle.effectiveEndDate || fallbackCycle.endDate;
+  if (!startDate || !endDate) {
+    throw new Error("请选择成本周期的开始和结束日期");
+  }
+  if (startDate > endDate) {
+    throw new Error("结束日期不能早于开始日期");
+  }
+  return {
+    mode,
+    startDate,
+    endDate
+  };
+}
+
+function previewCostCycleFromForm() {
+  try {
+    const cycle = readCostCycleFromForm();
+    if (cycle.mode === "naturalMonth") {
+      fillCostCycleForm({
+        ...latestCostSettings.costCycle,
+        mode: "naturalMonth"
+      });
+      return;
+    }
+    fillCostCycleForm({
+      ...cycle,
+      effectiveStartDate: cycle.startDate,
+      effectiveEndDate: cycle.endDate
+    });
+    costSettingsMessageNode.textContent = "";
+  } catch (error) {
+    costSettingsMessageNode.textContent = error.message || "周期无效";
+  }
 }
 
 function renderCostPackageList() {
@@ -721,12 +824,15 @@ async function handleCostSettingsSubmit(event) {
     ? (activeCostPackageId() || id)
     : id;
   try {
+    const costCycle = readCostCycleFromForm();
     const saved = await saveCostSettings({
       packages: nextPackages,
-      activePackageId: nextActivePackageId
+      activePackageId: nextActivePackageId,
+      costCycle
     });
-    renderCostSettings(saved);
-    fillCostPackageForm(nextPackage);
+    if (renderCostSettings(saved)) {
+      fillCostPackageForm(nextPackage);
+    }
   } catch (error) {
     costSettingsMessageNode.textContent = error.message || "保存失败";
   }
@@ -734,9 +840,14 @@ async function handleCostSettingsSubmit(event) {
 
 async function clearCostSettings() {
   try {
-    const saved = await saveCostSettings({ packages: [], activePackageId: "" });
-    renderCostSettings(saved);
-    fillCostPackageForm(null);
+    const saved = await saveCostSettings({
+      packages: [],
+      activePackageId: "",
+      costCycle: readCostCycleFromForm()
+    });
+    if (renderCostSettings(saved)) {
+      fillCostPackageForm(null);
+    }
   } catch (error) {
     costSettingsMessageNode.textContent = error.message || "清除失败";
   }
@@ -746,7 +857,8 @@ async function setActiveCostPackage(packageId) {
   try {
     const saved = await saveCostSettings({
       packages: currentCostPackages(),
-      activePackageId: packageId
+      activePackageId: packageId,
+      costCycle: latestCostSettings.costCycle
     });
     renderCostSettings(saved);
   } catch (error) {
@@ -762,12 +874,31 @@ async function removeCostPackage(packageId) {
   try {
     const saved = await saveCostSettings({
       packages: nextPackages,
-      activePackageId: nextActivePackageId
+      activePackageId: nextActivePackageId,
+      costCycle: latestCostSettings.costCycle
     });
-    renderCostSettings(saved);
-    fillCostPackageForm(null);
+    if (renderCostSettings(saved)) {
+      fillCostPackageForm(null);
+    }
   } catch (error) {
     costSettingsMessageNode.textContent = error.message || "删除失败";
+  }
+}
+
+async function saveCostCycleFromForm() {
+  try {
+    const costCycle = readCostCycleFromForm();
+    const saved = await saveCostSettings({
+      packages: currentCostPackages(),
+      activePackageId: activeCostPackageId(),
+      costCycle
+    });
+    if (renderCostSettings(saved)) {
+      costSettingsMessageNode.textContent = "";
+    }
+  } catch (error) {
+    costSettingsMessageNode.textContent = error.message || "周期保存失败";
+    fillCostCycleForm(latestCostSettings.costCycle);
   }
 }
 
@@ -786,6 +917,12 @@ closeCostSettingsButton.addEventListener("click", closeCostSettings);
 clearCostSettingsButton.addEventListener("click", clearCostSettings);
 newCostPackageButton.addEventListener("click", () => fillCostPackageForm(null));
 costSettingsForm.addEventListener("submit", handleCostSettingsSubmit);
+costCycleModeCustomInput.addEventListener("change", saveCostCycleFromForm);
+costCycleModeNaturalMonthInput.addEventListener("change", saveCostCycleFromForm);
+costCycleStartDateInput.addEventListener("input", previewCostCycleFromForm);
+costCycleEndDateInput.addEventListener("input", previewCostCycleFromForm);
+costCycleStartDateInput.addEventListener("change", saveCostCycleFromForm);
+costCycleEndDateInput.addEventListener("change", saveCostCycleFromForm);
 costPackageListNode.addEventListener("change", (event) => {
   if (event.target.matches("input[name='activeCostPackage']")) {
     setActiveCostPackage(event.target.value);
