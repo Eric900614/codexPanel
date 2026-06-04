@@ -345,7 +345,7 @@ function renderTokenBoard(snapshot, costSettings = latestCostSettings) {
     <section class="panel board-panel">
       <div class="section-header">
         <h2>Token 消耗看板</h2>
-        <p class="section-kicker cost-kicker">样本 ${escapeHtml(formatRaw(snapshot.tokenEventCount))} · ${escapeHtml(costSummaryText(costSettings))}</p>
+        <p class="section-kicker cost-kicker">样本 ${escapeHtml(formatRaw(snapshot.tokenEventCount))}</p>
       </div>
       <div class="token-cards">
         ${renderTokenCard("今日", snapshot.totals.todayTokens)}
@@ -390,29 +390,41 @@ function renderCostEstimate(costEstimate) {
   const projects = costEstimate.projects.slice(0, 2);
   const cycleText = formatCycleRange(costEstimate.cycle);
   const compactCycleText = formatCompactCycleRange(costEstimate.cycle);
-  const packageText = `${costEstimate.packageName} ${formatCurrency(costEstimate.packageAmount, costEstimate.currency)}`;
+  const packageAmount = formatCurrency(costEstimate.packageAmount, costEstimate.currency);
   return `
     <div class="cost-estimate">
       <div class="cost-home-summary">
         <div>
-          <p class="cost-estimate-label">分摊成本</p>
+          <p class="cost-estimate-label">本周期分摊成本</p>
           <p class="cost-estimate-main">${escapeHtml(formatCurrency(costEstimate.totalAllocatedCost, costEstimate.currency))}</p>
         </div>
-        <div class="cost-home-meta">
-          <span>${escapeHtml(packageText)}</span>
-          <span title="${escapeHtml(cycleText)}">${escapeHtml(compactCycleText)}</span>
+        <div class="cost-package-summary">
+          <span class="cost-package-name">${escapeHtml(costEstimate.packageName)}</span>
+          <span class="cost-package-amount">套餐 ${escapeHtml(packageAmount)}</span>
         </div>
       </div>
+      <div class="cost-cycle-row">
+        <span>周期</span>
+        <strong title="${escapeHtml(cycleText)}">${escapeHtml(compactCycleText)}</strong>
+      </div>
       <div class="cost-project-list">
-        ${projects.map((project) => `
-          <div class="cost-project-row">
+        <div class="cost-project-heading">
+          <span>Top 项目</span>
+          <span>分摊成本</span>
+        </div>
+        ${projects.map((project) => {
+          const sharePercent = clamp(project.share * 100, 0, 100);
+          return `
+          <div class="cost-project-row" title="${escapeHtml(project.project)}">
             <span class="cost-project-main">
               <span class="cost-project-name">${escapeHtml(project.project)}</span>
               <small class="cost-project-token">${escapeHtml(formatTokenShort(project.tokens))} Token · ${escapeHtml(formatPercent(project.share * 100))}</small>
             </span>
-            <strong>${escapeHtml(formatCurrency(project.allocatedCost, costEstimate.currency))}</strong>
+            <strong class="cost-project-cost">${escapeHtml(formatCurrency(project.allocatedCost, costEstimate.currency))}</strong>
+            <span class="cost-project-bar" aria-hidden="true"><span style="width: ${sharePercent}%"></span></span>
           </div>
-        `).join("")}
+        `;
+        }).join("")}
       </div>
     </div>
   `;

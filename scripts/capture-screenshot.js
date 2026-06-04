@@ -199,10 +199,11 @@ app.whenReady().then(async () => {
     document.getElementById("costCycleStartDate").value = "2026-06-01";
     await changeValue("costCycleEndDate", "2026-06-30");
     await waitFor("custom cost cycle publish", () => (
-      (document.getElementById("app")?.innerText || "").includes("2026-06-30") &&
+      (document.querySelector(".cost-cycle-row strong")?.title || "").includes("2026-06-30") &&
       (document.getElementById("costCycleSummary")?.innerText || "").includes("2026-06-30")
     ));
     const appTextAfterCustomCycle = document.getElementById("app")?.innerText || "";
+    const cycleTitleAfterCustomCycle = document.querySelector(".cost-cycle-row strong")?.title || "";
     const customCycleSummaryText = document.getElementById("costCycleSummary")?.innerText || "";
 
     document.getElementById("costCycleStartDate").value = "1900-01-01";
@@ -217,7 +218,7 @@ app.whenReady().then(async () => {
     await changeValue("costCycleEndDate", "2026-06-30");
     await waitFor("custom cost cycle republish", () => (
       Boolean(document.querySelector(".cost-estimate:not(.is-unavailable)")) &&
-      (document.getElementById("app")?.innerText || "").includes("2026-06-30")
+      (document.querySelector(".cost-cycle-row strong")?.title || "").includes("2026-06-30")
     ));
 
     document.getElementById("costCycleModeNaturalMonth").click();
@@ -237,14 +238,19 @@ app.whenReady().then(async () => {
       listShowsBothPackages: listText.includes("5x") && listText.includes("20x Pro"),
       invalidInputRejected: invalidPackageMessage.length > 0 && appText.includes("20x Pro"),
       invalidCycleRejected: invalidCycleMessage.length > 0,
-      customCyclePublished: appTextAfterCustomCycle.includes("自定义") && appTextAfterCustomCycle.includes("2026-06-30") && customCycleSummaryText.includes("2026-06-30"),
+      customCyclePublished: appTextAfterCustomCycle.includes("自定义") && cycleTitleAfterCustomCycle.includes("2026-06-30") && customCycleSummaryText.includes("2026-06-30"),
       zeroTokenCycleHasSetupEntry,
       naturalMonthVisible: appText.includes("自然月") && cycleSummaryText.includes("自然月"),
       costAllocationVisible: Boolean(document.querySelector(".cost-estimate:not(.is-unavailable)")),
       projectAllocationVisible: document.querySelectorAll(".cost-project-row").length > 0,
       projectRowsWithTokenContext: Array.from(document.querySelectorAll(".cost-project-row"))
         .every((row) => Boolean(row.querySelector(".cost-project-token"))),
+      projectRowsWithShareBars: Array.from(document.querySelectorAll(".cost-project-row"))
+        .every((row) => Boolean(row.querySelector(".cost-project-bar"))),
       homepageCostMetaVisible: Boolean(document.querySelector(".cost-home-summary")),
+      costPackageSummaryVisible: Boolean(document.querySelector(".cost-package-summary")),
+      costCycleRowVisible: Boolean(document.querySelector(".cost-cycle-row")),
+      compactHeaderVisible: (document.querySelector(".cost-kicker")?.innerText || "").startsWith("样本 "),
       overlayVisible: Boolean(overlay && !overlay.hidden && overlay.offsetHeight > 0),
       listText,
       formName: document.getElementById("costPackageName")?.value || "",
@@ -262,19 +268,24 @@ app.whenReady().then(async () => {
   assert.equal(packageUiState.costAllocationVisible, true, "active package should show an available cost allocation");
   assert.equal(packageUiState.projectAllocationVisible, true, "cost allocation should include project rows");
   assert.equal(packageUiState.projectRowsWithTokenContext, true, "top project cost rows should include token context");
+  assert.equal(packageUiState.projectRowsWithShareBars, true, "top project cost rows should include compact share bars");
   assert.equal(packageUiState.homepageCostMetaVisible, true, "configured homepage should show active package and cycle summary");
+  assert.equal(packageUiState.costPackageSummaryVisible, true, "configured homepage should show active package separately from the header");
+  assert.equal(packageUiState.costCycleRowVisible, true, "configured homepage should show cost cycle in its own row");
+  assert.equal(packageUiState.compactHeaderVisible, true, "token board header should stay compact");
   assert.equal(packageUiState.overlayVisible, true, "cost settings should remain visible for final screenshot");
 
-  await new Promise((resolve) => setTimeout(resolve, 250));
-  window.webContents.send("usage:syncProgress", {
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  const degradedProgress = {
     state: "idle",
     phase: "idle",
     processedFileCount: uiState.progressCount ? Number(uiState.progressCount.split(" / ")[0]) || 0 : 0,
     totalFileCount: null,
     message: "Temporary read errors.",
     errorCount: 2
-  });
-  await new Promise((resolve) => setTimeout(resolve, 120));
+  };
+  await window.webContents.executeJavaScript(`renderSyncProgress(${JSON.stringify(degradedProgress)})`);
+  await new Promise((resolve) => setTimeout(resolve, 60));
 
   const degradedState = await window.webContents.executeJavaScript(`(() => {
     const progressText = document.getElementById("syncProgressMessage")?.textContent?.trim() || "";
@@ -306,7 +317,12 @@ app.whenReady().then(async () => {
       costAllocationVisible: Boolean(document.querySelector(".cost-estimate:not(.is-unavailable)")),
       projectRowsWithTokenContext: Array.from(document.querySelectorAll(".cost-project-row"))
         .every((row) => Boolean(row.querySelector(".cost-project-token"))),
+      projectRowsWithShareBars: Array.from(document.querySelectorAll(".cost-project-row"))
+        .every((row) => Boolean(row.querySelector(".cost-project-bar"))),
       homepageCostMetaVisible: Boolean(document.querySelector(".cost-home-summary")),
+      costPackageSummaryVisible: Boolean(document.querySelector(".cost-package-summary")),
+      costCycleRowVisible: Boolean(document.querySelector(".cost-cycle-row")),
+      compactHeaderVisible: (document.querySelector(".cost-kicker")?.innerText || "").startsWith("样本 "),
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
       scrollWidth: document.documentElement.scrollWidth,
@@ -317,7 +333,11 @@ app.whenReady().then(async () => {
   assert.equal(configuredHomepageState.overlayHidden, true, "final screenshot should show the configured homepage, not the settings modal");
   assert.equal(configuredHomepageState.costAllocationVisible, true, "configured homepage should show available cost allocation");
   assert.equal(configuredHomepageState.projectRowsWithTokenContext, true, "configured homepage project rows should include token context");
+  assert.equal(configuredHomepageState.projectRowsWithShareBars, true, "configured homepage project rows should include compact share bars");
   assert.equal(configuredHomepageState.homepageCostMetaVisible, true, "configured homepage should show active package and cycle summary");
+  assert.equal(configuredHomepageState.costPackageSummaryVisible, true, "configured homepage should show active package separately from the header");
+  assert.equal(configuredHomepageState.costCycleRowVisible, true, "configured homepage should show cost cycle in its own row");
+  assert.equal(configuredHomepageState.compactHeaderVisible, true, "configured homepage token board header should stay compact");
   assert(configuredHomepageState.scrollWidth <= configuredHomepageState.viewportWidth, "configured dashboard should not have a horizontal scrollbar");
   assert(configuredHomepageState.scrollHeight <= configuredHomepageState.viewportHeight, "configured dashboard should not have a vertical scrollbar");
 
