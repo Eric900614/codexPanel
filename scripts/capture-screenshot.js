@@ -205,6 +205,21 @@ app.whenReady().then(async () => {
     const appTextAfterCustomCycle = document.getElementById("app")?.innerText || "";
     const customCycleSummaryText = document.getElementById("costCycleSummary")?.innerText || "";
 
+    document.getElementById("costCycleStartDate").value = "1900-01-01";
+    await changeValue("costCycleEndDate", "1900-01-01");
+    await waitFor("zero-token cost cycle unavailable", () => (
+      (document.getElementById("app")?.innerText || "").includes("当前周期没有 Token") &&
+      Boolean(document.querySelector(".cost-estimate.is-unavailable"))
+    ));
+    const zeroTokenCycleHasSetupEntry = Boolean(document.querySelector(".cost-estimate.is-unavailable .cost-setup-entry"));
+
+    document.getElementById("costCycleStartDate").value = "2026-06-01";
+    await changeValue("costCycleEndDate", "2026-06-30");
+    await waitFor("custom cost cycle republish", () => (
+      Boolean(document.querySelector(".cost-estimate:not(.is-unavailable)")) &&
+      (document.getElementById("app")?.innerText || "").includes("2026-06-30")
+    ));
+
     document.getElementById("costCycleModeNaturalMonth").click();
     await waitFor("natural-month cost cycle publish", () => (
       (document.getElementById("app")?.innerText || "").includes("自然月") &&
@@ -223,6 +238,7 @@ app.whenReady().then(async () => {
       invalidInputRejected: invalidPackageMessage.length > 0 && appText.includes("20x Pro"),
       invalidCycleRejected: invalidCycleMessage.length > 0,
       customCyclePublished: appTextAfterCustomCycle.includes("自定义") && appTextAfterCustomCycle.includes("2026-06-30") && customCycleSummaryText.includes("2026-06-30"),
+      zeroTokenCycleHasSetupEntry,
       naturalMonthVisible: appText.includes("自然月") && cycleSummaryText.includes("自然月"),
       costAllocationVisible: Boolean(document.querySelector(".cost-estimate:not(.is-unavailable)")),
       projectAllocationVisible: document.querySelectorAll(".cost-project-row").length > 0,
@@ -241,6 +257,7 @@ app.whenReady().then(async () => {
   assert.equal(packageUiState.invalidInputRejected, true, "invalid package input should not corrupt saved settings");
   assert.equal(packageUiState.invalidCycleRejected, true, "invalid cost cycle dates should show clear feedback");
   assert.equal(packageUiState.customCyclePublished, true, "custom cost cycle date changes should publish visible app state without saving a package");
+  assert.equal(packageUiState.zeroTokenCycleHasSetupEntry, false, "zero-token cost cycle should not ask users to configure a package");
   assert.equal(packageUiState.naturalMonthVisible, true, "natural-month cycle should update visible app state without restart");
   assert.equal(packageUiState.costAllocationVisible, true, "active package should show an available cost allocation");
   assert.equal(packageUiState.projectAllocationVisible, true, "cost allocation should include project rows");
