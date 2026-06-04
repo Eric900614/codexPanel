@@ -77,6 +77,138 @@ function walkJsonlFiles(root) {
   return files;
 }
 
+function createSession(filePath, stat) {
+  return {
+    id: "",
+    filePath,
+    fileName: path.basename(filePath),
+    source: "unknown",
+    sourceLabel: "Unknown",
+    model: "",
+    modelProvider: "",
+    cwd: "",
+    project: "Projectless",
+    createdAt: stat.birthtimeMs,
+    updatedAt: stat.mtimeMs,
+    eventCount: 0,
+    tokenEventCount: 0,
+    totalTokens: 0,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningOutputTokens: 0,
+    lastTokens: 0,
+    contextWindow: 0,
+    latestRateLimits: null,
+    tokenEvents: [],
+    parseErrorCount: 0
+  };
+}
+
+function applySessionEvent(session, event, stat) {
+  session.eventCount += 1;
+  const payload = event.payload || {};
+  const eventTime = toMs(event.timestamp);
+  if (eventTime) {
+    session.updatedAt = Math.max(session.updatedAt, eventTime);
+  }
+
+  if (event.type === "session_meta") {
+    session.id = payload.id || session.id;
+    session.source = payload.source || payload.originator || session.source;
+    session.sourceLabel = normalizeSource(session.source);
+    session.modelProvider = payload.model_provider || session.modelProvider;
+    session.cwd = payload.cwd || session.cwd;
+    session.project = formatPathProject(session.cwd);
+    session.createdAt = toMs(payload.timestamp) || session.createdAt;
+  }
+
+  if (event.type === "turn_context") {
+    session.model = payload.model || session.model;
+    session.cwd = payload.cwd || session.cwd;
+    session.project = formatPathProject(session.cwd);
+  }
+
+  if (event.type === "event_msg" && payload.type === "token_count") {
+    session.tokenEventCount += 1;
+    const info = payload.info || {};
+    const total = info.total_token_usage || {};
+    const last = info.last_token_usage || {};
+    const tokenEventTime = eventTime || stat.mtimeMs;
+
+    session.inputTokens = total.input_tokens || 0;
+    session.cachedInputTokens = total.cached_input_tokens || 0;
+    session.outputTokens = total.output_tokens || 0;
+    session.reasoningOutputTokens = total.reasoning_output_tokens || 0;
+    session.totalTokens = total.total_tokens || 0;
+    session.lastTokens = last.total_tokens || 0;
+    session.contextWindow = info.model_context_window || session.contextWindow;
+    session.latestRateLimits = payload.rate_limits || session.latestRateLimits;
+    session.tokenEvents.push({
+      timestamp: tokenEventTime,
+      totalTokens: total.total_tokens || 0,
+      lastTokens: last.total_tokens || 0,
+      inputTokens: last.input_tokens || 0,
+      cachedInputTokens: last.cached_input_tokens || 0,
+      outputTokens: last.output_tokens || 0,
+      reasoningOutputTokens: last.reasoning_output_tokens || 0
+    });
+  }
+}
+
+function parseJsonlIntoSession(session, text, stat, options = {}) {
+  const combined = `${options.partialLine || ""}${text}`;
+  const lines = combined.split("\n");
+  const partialLine = options.bufferPartialLine && !combined.endsWith("\n")
+    ? lines.pop()
+    : "";
+  let parseErrorCount = 0;
+
+  for (const rawLine of lines) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (!line.trim()) continue;
+
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      parseErrorCount += 1;
+      continue;
+    }
+
+    applySessionEvent(session, event, stat);
+  }
+
+  session.parseErrorCount = (session.parseErrorCount || 0) + parseErrorCount;
+  return { partialLine, parseErrorCount };
+}
+
+function finishSessionIdentity(session, filePath) {
+  if (!session.id) {
+    const match = path.basename(filePath).match(/rollout-[^-]+-[^-]+-[^-]+-(.+)\.jsonl$/);
+    session.id = match ? match[1] : path.basename(filePath, ".jsonl");
+  }
+
+  session.sourceLabel = normalizeSource(session.source);
+  session.project = formatPathProject(session.cwd);
+}
+
+function readFileRange(filePath, position, length) {
+  const buffer = Buffer.alloc(length);
+  const fd = fs.openSync(filePath, "r");
+  let bytesRead = 0;
+  try {
+    while (bytesRead < length) {
+      const count = fs.readSync(fd, buffer, bytesRead, length - bytesRead, position + bytesRead);
+      if (count === 0) break;
+      bytesRead += count;
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return buffer.subarray(0, bytesRead).toString("utf8");
+}
+
 class UsageReader {
   constructor(options = {}) {
     this.codexHome = options.codexHome || getDefaultCodexHome();
@@ -170,6 +302,89 @@ class UsageReader {
     return snapshot;
   }
 
+  reconcileIncremental(options = {}) {
+    if (this.cache.size === 0) {
+      return this.reconcileFull(options);
+    }
+
+    const startedAt = Date.now();
+    const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+
+    emitProgress(onProgress, {
+      state: "scanning",
+      phase: "scanning",
+      processedFileCount: 0,
+      totalFileCount: null,
+      message: "Scanning Codex session files.",
+      errorCount: 0
+    });
+
+    const files = walkJsonlFiles(this.sessionsRoot);
+    emitProgress(onProgress, {
+      state: "scanning",
+      phase: "scanning",
+      processedFileCount: files.length,
+      totalFileCount: files.length,
+      message: `Found ${files.length} session files.`,
+      errorCount: 0
+    });
+
+    const sessions = [];
+    let errorCount = 0;
+    let changedFileCount = 0;
+
+    if (files.length === 0) {
+      emitProgress(onProgress, {
+        state: "reconciling",
+        phase: "tailing",
+        processedFileCount: 0,
+        totalFileCount: 0,
+        message: "No session files to tail.",
+        errorCount: 0
+      });
+    }
+
+    files.forEach((filePath, index) => {
+      const session = this.tailSession(filePath);
+      if (session) {
+        sessions.push(session);
+        if (session.error) errorCount += 1;
+        if (session.changed) changedFileCount += 1;
+      }
+
+      emitProgress(onProgress, {
+        state: "reconciling",
+        phase: "tailing",
+        processedFileCount: index + 1,
+        totalFileCount: files.length,
+        message: `Checked ${index + 1} of ${files.length} session files.`,
+        errorCount
+      });
+    });
+
+    const finalSync = {
+      state: "idle",
+      phase: "idle",
+      processedFileCount: files.length,
+      totalFileCount: files.length,
+      message: errorCount > 0
+        ? `Incremental sync finished with ${errorCount} temporary read error${errorCount === 1 ? "" : "s"}.`
+        : `Incremental sync complete. ${changedFileCount} changed file${changedFileCount === 1 ? "" : "s"}.`,
+      errorCount
+    };
+
+    const snapshot = buildSnapshot({
+      codexHome: this.codexHome,
+      sessionsRoot: this.sessionsRoot,
+      sessions,
+      scannedFileCount: files.length,
+      elapsedMs: Date.now() - startedAt,
+      sync: finalSync
+    });
+    emitProgress(onProgress, finalSync);
+    return snapshot;
+  }
+
   parseSession(filePath) {
     let stat;
     try {
@@ -190,106 +405,60 @@ class UsageReader {
       return buildReadErrorSession(filePath, stat, error, cached);
     }
 
-    const session = {
-      id: "",
-      filePath,
-      fileName: path.basename(filePath),
-      source: "unknown",
-      sourceLabel: "Unknown",
-      model: "",
-      modelProvider: "",
-      cwd: "",
-      project: "Projectless",
-      createdAt: stat.birthtimeMs,
-      updatedAt: stat.mtimeMs,
-      eventCount: 0,
-      tokenEventCount: 0,
-      totalTokens: 0,
-      inputTokens: 0,
-      cachedInputTokens: 0,
-      outputTokens: 0,
-      reasoningOutputTokens: 0,
-      lastTokens: 0,
-      contextWindow: 0,
-      latestRateLimits: null,
-      tokenEvents: []
-    };
-
-    const lines = text.split(/\r?\n/);
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      let event;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        continue;
-      }
-
-      session.eventCount += 1;
-      const payload = event.payload || {};
-      const eventTime = toMs(event.timestamp);
-      if (eventTime) {
-        session.updatedAt = Math.max(session.updatedAt, eventTime);
-      }
-
-      if (event.type === "session_meta") {
-        session.id = payload.id || session.id;
-        session.source = payload.source || payload.originator || session.source;
-        session.sourceLabel = normalizeSource(session.source);
-        session.modelProvider = payload.model_provider || session.modelProvider;
-        session.cwd = payload.cwd || session.cwd;
-        session.project = formatPathProject(session.cwd);
-        session.createdAt = toMs(payload.timestamp) || session.createdAt;
-      }
-
-      if (event.type === "turn_context") {
-        session.model = payload.model || session.model;
-        session.cwd = payload.cwd || session.cwd;
-        session.project = formatPathProject(session.cwd);
-      }
-
-      if (event.type === "event_msg" && payload.type === "token_count") {
-        session.tokenEventCount += 1;
-        const info = payload.info || {};
-        const total = info.total_token_usage || {};
-        const last = info.last_token_usage || {};
-        const tokenEventTime = eventTime || stat.mtimeMs;
-
-        session.inputTokens = total.input_tokens || 0;
-        session.cachedInputTokens = total.cached_input_tokens || 0;
-        session.outputTokens = total.output_tokens || 0;
-        session.reasoningOutputTokens = total.reasoning_output_tokens || 0;
-        session.totalTokens = total.total_tokens || 0;
-        session.lastTokens = last.total_tokens || 0;
-        session.contextWindow = info.model_context_window || session.contextWindow;
-        session.latestRateLimits = payload.rate_limits || session.latestRateLimits;
-        session.tokenEvents.push({
-          timestamp: tokenEventTime,
-          totalTokens: total.total_tokens || 0,
-          lastTokens: last.total_tokens || 0,
-          inputTokens: last.input_tokens || 0,
-          cachedInputTokens: last.cached_input_tokens || 0,
-          outputTokens: last.output_tokens || 0,
-          reasoningOutputTokens: last.reasoning_output_tokens || 0
-        });
-      }
-    }
-
-    if (!session.id) {
-      const match = path.basename(filePath).match(/rollout-[^-]+-[^-]+-[^-]+-(.+)\.jsonl$/);
-      session.id = match ? match[1] : path.basename(filePath, ".jsonl");
-    }
-
-    session.sourceLabel = normalizeSource(session.source);
-    session.project = formatPathProject(session.cwd);
+    const session = createSession(filePath, stat);
+    parseJsonlIntoSession(session, text, stat);
+    finishSessionIdentity(session, filePath);
 
     this.cache.set(filePath, {
       mtimeMs: stat.mtimeMs,
       size: stat.size,
+      offset: stat.size,
+      partialLine: "",
       session
     });
 
     return session;
+  }
+
+  tailSession(filePath) {
+    let stat;
+    try {
+      stat = fs.statSync(filePath);
+    } catch {
+      return null;
+    }
+
+    const cached = this.cache.get(filePath);
+    if (!cached || stat.size < (cached.offset || 0)) {
+      const session = this.parseSession(filePath);
+      if (session) session.changed = true;
+      return session;
+    }
+
+    if (stat.size === (cached.offset || 0)) {
+      cached.session.changed = false;
+      return cached.session;
+    }
+
+    let text = "";
+    try {
+      text = readFileRange(filePath, cached.offset || 0, stat.size - (cached.offset || 0));
+    } catch (error) {
+      return buildReadErrorSession(filePath, stat, error, cached);
+    }
+
+    const parseResult = parseJsonlIntoSession(cached.session, text, stat, {
+      bufferPartialLine: true,
+      partialLine: cached.partialLine || ""
+    });
+    finishSessionIdentity(cached.session, filePath);
+    cached.session.changed = true;
+    cached.session.error = "";
+    cached.mtimeMs = stat.mtimeMs;
+    cached.size = stat.size;
+    cached.offset = stat.size;
+    cached.partialLine = parseResult.partialLine;
+    return cached.session;
   }
 }
 

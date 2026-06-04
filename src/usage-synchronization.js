@@ -23,6 +23,15 @@ class UsageSynchronization {
     return snapshot;
   }
 
+  syncIncremental() {
+    const snapshot = this.reader.reconcileIncremental({
+      onProgress: (progress) => this.publishProgress(progress)
+    });
+    this.latestSnapshot = snapshot;
+    this.publishSnapshot(snapshot);
+    return snapshot;
+  }
+
   getLatestSnapshot() {
     return this.latestSnapshot;
   }

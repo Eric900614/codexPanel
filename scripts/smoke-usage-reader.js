@@ -255,6 +255,29 @@ const fakeReader = {
       },
       marker: `snapshot-${this.nextSnapshotId++}`
     };
+  },
+  reconcileIncremental({ onProgress } = {}) {
+    onProgress?.({
+      state: "idle",
+      phase: "idle",
+      processedFileCount: 1,
+      totalFileCount: 1,
+      message: "Incremental done.",
+      errorCount: 0
+    });
+    return {
+      exists: true,
+      scannedFileCount: this.nextSnapshotId,
+      sync: {
+        state: "idle",
+        phase: "idle",
+        processedFileCount: 1,
+        totalFileCount: 1,
+        message: "Incremental done.",
+        errorCount: 0
+      },
+      marker: `incremental-${this.nextSnapshotId++}`
+    };
   }
 };
 const synchronization = new UsageSynchronization({
@@ -277,3 +300,74 @@ assert.equal(pushedSnapshots.length, 1);
 synchronization.refreshFull();
 assert.equal(pushedSnapshots.length, 2);
 assert.equal(pushedSnapshots[1].marker, "snapshot-2");
+
+synchronization.syncIncremental();
+assert.equal(pushedSnapshots.length, 3);
+assert.equal(pushedSnapshots[2].marker, "incremental-3");
+
+const incrementalFixture = createFixture();
+const incrementalReader = new UsageReader({
+  codexHome: incrementalFixture.root,
+  sessionsRoot: incrementalFixture.sessionsRoot
+});
+const incrementalInitialSnapshot = incrementalReader.reconcileFull();
+const incrementalAlphaPath = path.join(
+  incrementalFixture.sessionsRoot,
+  "2026",
+  "06",
+  "rollout-a-b-c-alpha.jsonl"
+);
+const incrementalStartSize = fs.statSync(incrementalAlphaPath).size;
+const incrementalAppend = [
+  "",
+  JSON.stringify(tokenCountEvent(new Date().toISOString(), 1800, 600)),
+  "{\"type\":\"bad json\"",
+  JSON.stringify(tokenCountEvent(new Date().toISOString(), 2400, 600)).slice(0, 30)
+].join("\n");
+
+assert.equal(incrementalInitialSnapshot.totals.totalTokens, 2400);
+fs.appendFileSync(incrementalAlphaPath, incrementalAppend, "utf8");
+
+const incrementalReads = [];
+const originalOpenSync = fs.openSync;
+const originalReadSync = fs.readSync;
+const originalCloseSync = fs.closeSync;
+const incrementalOpenFds = new Set();
+const incrementalClosedFds = new Set();
+fs.openSync = function openIncrementalFile(filePath, ...args) {
+  const fd = originalOpenSync.call(fs, filePath, ...args);
+  incrementalOpenFds.add(fd);
+  return fd;
+};
+fs.readSync = function readIncrementalFile(fd, buffer, offset, length, position) {
+  incrementalReads.push({ length, position });
+  return originalReadSync.call(fs, fd, buffer, offset, length, position);
+};
+fs.closeSync = function closeIncrementalFile(fd) {
+  incrementalClosedFds.add(fd);
+  return originalCloseSync.call(fs, fd);
+};
+
+let incrementalSnapshot;
+try {
+  incrementalSnapshot = incrementalReader.reconcileIncremental();
+} finally {
+  fs.openSync = originalOpenSync;
+  fs.readSync = originalReadSync;
+  fs.closeSync = originalCloseSync;
+}
+
+assert.equal(incrementalSnapshot.totals.totalTokens, 3000);
+assert(incrementalReads.some((read) => (
+  read.position === incrementalStartSize &&
+  read.length === Buffer.byteLength(incrementalAppend)
+)));
+assert.equal(incrementalOpenFds.size, incrementalClosedFds.size);
+
+fs.appendFileSync(
+  incrementalAlphaPath,
+  `${JSON.stringify(tokenCountEvent(new Date().toISOString(), 2400, 600)).slice(30)}\n`,
+  "utf8"
+);
+const completedPartialSnapshot = incrementalReader.reconcileIncremental();
+assert.equal(completedPartialSnapshot.totals.totalTokens, 3600);
