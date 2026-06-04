@@ -7,8 +7,12 @@ const costSettingsOverlay = document.getElementById("costSettingsOverlay");
 const costSettingsForm = document.getElementById("costSettingsForm");
 const closeCostSettingsButton = document.getElementById("closeCostSettingsButton");
 const clearCostSettingsButton = document.getElementById("clearCostSettingsButton");
+const newCostPackageButton = document.getElementById("newCostPackageButton");
+const costPackageListNode = document.getElementById("costPackageList");
+const costPackageIdInput = document.getElementById("costPackageId");
 const costPackageNameInput = document.getElementById("costPackageName");
 const costPackageAmountInput = document.getElementById("costPackageAmount");
+const costPackageCurrencyInput = document.getElementById("costPackageCurrency");
 const costSettingsMessageNode = document.getElementById("costSettingsMessage");
 const syncProgressNode = document.getElementById("syncProgress");
 const syncProgressMessageNode = document.getElementById("syncProgressMessage");
@@ -51,21 +55,40 @@ function buildUnconfiguredCostSettings() {
   return {
     version: 1,
     configured: false,
+    packages: [],
+    activePackageId: "",
+    activePackage: null,
     costPackage: null,
     updatedAt: null
   };
 }
 
 function isCostPackageConfigured(settings) {
-  return Boolean(settings?.configured && settings.costPackage);
+  return Boolean(settings?.configured && (settings.activePackage || settings.costPackage));
 }
 
-function formatCurrencyCny(value) {
-  return new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency: "CNY",
-    maximumFractionDigits: 0
-  }).format(Number(value) || 0);
+function formatCurrency(value, currency = "CNY") {
+  try {
+    return new Intl.NumberFormat("zh-CN", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0
+    }).format(Number(value) || 0);
+  } catch {
+    return `${currency} ${new Intl.NumberFormat("zh-CN").format(Math.round(Number(value) || 0))}`;
+  }
+}
+
+function isSupportedCurrency(currency) {
+  try {
+    new Intl.NumberFormat("zh-CN", {
+      style: "currency",
+      currency
+    }).format(1);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function progressPercent(progress) {
@@ -265,8 +288,9 @@ function costSummaryText(costSettings) {
     return "未配置成本套餐";
   }
 
-  const costPackage = costSettings.costPackage;
-  return `${costPackage.name} ${formatCurrencyCny(costPackage.amountCny)}`;
+  const costPackage = costSettings.activePackage || costSettings.costPackage;
+  const amount = costPackage.amount ?? costPackage.amountCny;
+  return `${costPackage.name} ${formatCurrency(amount, costPackage.currency || "CNY")}`;
 }
 
 function renderTokenBoard(snapshot, costSettings = latestCostSettings) {
@@ -511,6 +535,9 @@ function renderCostSettings(settings) {
   if (latestSnapshot) {
     renderSnapshot(latestSnapshot);
   }
+  if (costSettingsOverlay && !costSettingsOverlay.hidden) {
+    renderCostPackageList();
+  }
 }
 
 async function loadCostSettings() {
@@ -593,9 +620,8 @@ async function runManualRefresh() {
 
 function openCostSettings() {
   if (!costSettingsOverlay) return;
-  const costPackage = latestCostSettings?.costPackage;
-  costPackageNameInput.value = costPackage?.name || "";
-  costPackageAmountInput.value = costPackage?.amountCny || "";
+  renderCostPackageList();
+  fillCostPackageForm(latestCostSettings?.activePackage || latestCostSettings?.costPackage || null);
   costSettingsMessageNode.textContent = "";
   costSettingsOverlay.hidden = false;
   costPackageNameInput.focus();
@@ -612,31 +638,95 @@ async function saveCostSettings(settings) {
   }
   return {
     version: 1,
-    configured: Boolean(settings.costPackage),
-    costPackage: settings.costPackage,
+    configured: Boolean(settings.activePackageId),
+    packages: settings.packages || [],
+    activePackageId: settings.activePackageId || "",
+    activePackage: (settings.packages || []).find((costPackage) => costPackage.id === settings.activePackageId) || null,
+    costPackage: null,
     updatedAt: new Date().toISOString()
   };
 }
 
-async function handleCostSettingsSubmit(event) {
-  event.preventDefault();
-  const name = costPackageNameInput.value.trim() || "成本套餐";
-  const amountCny = Number(costPackageAmountInput.value);
-  if (!Number.isFinite(amountCny) || amountCny <= 0) {
-    costSettingsMessageNode.textContent = "请输入大于 0 的套餐金额";
+function currentCostPackages() {
+  return Array.isArray(latestCostSettings?.packages) ? latestCostSettings.packages : [];
+}
+
+function activeCostPackageId() {
+  return latestCostSettings?.activePackageId || latestCostSettings?.activePackage?.id || "";
+}
+
+function makeCostPackageId(name) {
+  const slug = String(name || "package").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `${slug || "package"}-${Date.now().toString(36)}`;
+}
+
+function fillCostPackageForm(costPackage) {
+  costPackageIdInput.value = costPackage?.id || "";
+  costPackageNameInput.value = costPackage?.name || "";
+  costPackageAmountInput.value = costPackage?.amount ?? costPackage?.amountCny ?? "";
+  costPackageCurrencyInput.value = costPackage?.currency || "CNY";
+  costSettingsMessageNode.textContent = "";
+}
+
+function renderCostPackageList() {
+  if (!costPackageListNode) return;
+  const packages = currentCostPackages();
+  if (packages.length === 0) {
+    costPackageListNode.innerHTML = `<p class="package-empty">还没有成本套餐</p>`;
     return;
   }
 
+  const activeId = activeCostPackageId() || packages[0].id;
+  costPackageListNode.innerHTML = packages.map((costPackage) => `
+    <div class="package-row">
+      <label class="package-choice">
+        <input type="radio" name="activeCostPackage" value="${escapeHtml(costPackage.id)}" ${costPackage.id === activeId ? "checked" : ""}>
+        <span>
+          <strong>${escapeHtml(costPackage.name)}</strong>
+          <small>${escapeHtml(formatCurrency(costPackage.amount ?? costPackage.amountCny, costPackage.currency || "CNY"))} · ${escapeHtml(costPackage.currency || "CNY")}</small>
+        </span>
+      </label>
+      <button class="text-button" type="button" data-action="edit-package" data-package-id="${escapeHtml(costPackage.id)}">编辑</button>
+      <button class="text-button" type="button" data-action="remove-package" data-package-id="${escapeHtml(costPackage.id)}">删除</button>
+    </div>
+  `).join("");
+}
+
+async function handleCostSettingsSubmit(event) {
+  event.preventDefault();
+  const name = costPackageNameInput.value.trim();
+  const amount = Number(costPackageAmountInput.value);
+  const currency = costPackageCurrencyInput.value.trim().toUpperCase() || "CNY";
+  if (!name) {
+    costSettingsMessageNode.textContent = "请输入套餐名称";
+    return;
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    costSettingsMessageNode.textContent = "请输入大于 0 的套餐金额";
+    return;
+  }
+  if (!isSupportedCurrency(currency)) {
+    costSettingsMessageNode.textContent = "请输入有效的币种代码";
+    return;
+  }
+
+  const id = costPackageIdInput.value || makeCostPackageId(name);
+  const packages = currentCostPackages();
+  const isExistingPackage = packages.some((costPackage) => costPackage.id === id);
+  const nextPackage = { id, name, amount, currency };
+  const nextPackages = isExistingPackage
+    ? packages.map((costPackage) => (costPackage.id === id ? nextPackage : costPackage))
+    : [...packages, nextPackage];
+  const nextActivePackageId = isExistingPackage
+    ? (activeCostPackageId() || id)
+    : id;
   try {
     const saved = await saveCostSettings({
-      costPackage: {
-        name,
-        amountCny,
-        currency: "CNY"
-      }
+      packages: nextPackages,
+      activePackageId: nextActivePackageId
     });
     renderCostSettings(saved);
-    closeCostSettings();
+    fillCostPackageForm(nextPackage);
   } catch (error) {
     costSettingsMessageNode.textContent = error.message || "保存失败";
   }
@@ -644,11 +734,40 @@ async function handleCostSettingsSubmit(event) {
 
 async function clearCostSettings() {
   try {
-    const saved = await saveCostSettings({ costPackage: null });
+    const saved = await saveCostSettings({ packages: [], activePackageId: "" });
     renderCostSettings(saved);
-    closeCostSettings();
+    fillCostPackageForm(null);
   } catch (error) {
     costSettingsMessageNode.textContent = error.message || "清除失败";
+  }
+}
+
+async function setActiveCostPackage(packageId) {
+  try {
+    const saved = await saveCostSettings({
+      packages: currentCostPackages(),
+      activePackageId: packageId
+    });
+    renderCostSettings(saved);
+  } catch (error) {
+    costSettingsMessageNode.textContent = error.message || "切换失败";
+  }
+}
+
+async function removeCostPackage(packageId) {
+  const nextPackages = currentCostPackages().filter((costPackage) => costPackage.id !== packageId);
+  const nextActivePackageId = activeCostPackageId() === packageId
+    ? (nextPackages[0]?.id || "")
+    : activeCostPackageId();
+  try {
+    const saved = await saveCostSettings({
+      packages: nextPackages,
+      activePackageId: nextActivePackageId
+    });
+    renderCostSettings(saved);
+    fillCostPackageForm(null);
+  } catch (error) {
+    costSettingsMessageNode.textContent = error.message || "删除失败";
   }
 }
 
@@ -665,7 +784,25 @@ refreshButton.addEventListener("click", runManualRefresh);
 costSettingsButton.addEventListener("click", openCostSettings);
 closeCostSettingsButton.addEventListener("click", closeCostSettings);
 clearCostSettingsButton.addEventListener("click", clearCostSettings);
+newCostPackageButton.addEventListener("click", () => fillCostPackageForm(null));
 costSettingsForm.addEventListener("submit", handleCostSettingsSubmit);
+costPackageListNode.addEventListener("change", (event) => {
+  if (event.target.matches("input[name='activeCostPackage']")) {
+    setActiveCostPackage(event.target.value);
+  }
+});
+costPackageListNode.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-action]");
+  if (!button) return;
+  const packageId = button.dataset.packageId;
+  const costPackage = currentCostPackages().find((item) => item.id === packageId);
+  if (button.dataset.action === "edit-package" && costPackage) {
+    fillCostPackageForm(costPackage);
+  }
+  if (button.dataset.action === "remove-package" && packageId) {
+    removeCostPackage(packageId);
+  }
+});
 costSettingsOverlay.addEventListener("click", (event) => {
   if (event.target === costSettingsOverlay) {
     closeCostSettings();

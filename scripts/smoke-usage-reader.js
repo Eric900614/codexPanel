@@ -115,15 +115,19 @@ assert.equal(emptyCostSettings.configured, false);
 assert.equal(emptyCostSettings.costPackage, null);
 
 const savedCostSettings = costStore.saveSettings({
-  costPackage: {
-    name: "5x",
-    amountCny: 780,
-    currency: "CNY"
-  }
+  packages: [
+    { id: "package-5x", name: "5x", amount: 780, currency: "CNY" },
+    { id: "package-20x", name: "20x", amount: 1280, currency: "CNY" }
+  ],
+  activePackageId: "package-20x"
 });
 assert.equal(savedCostSettings.configured, true);
-assert.equal(savedCostSettings.costPackage.name, "5x");
-assert.equal(savedCostSettings.costPackage.amountCny, 780);
+assert.equal(savedCostSettings.packages.length, 2);
+assert.equal(savedCostSettings.activePackageId, "package-20x");
+assert.equal(savedCostSettings.activePackage.name, "20x");
+assert.equal(savedCostSettings.activePackage.amount, 1280);
+assert.equal(savedCostSettings.costPackage.name, "20x");
+assert.equal(savedCostSettings.costPackage.amountCny, 1280);
 assert(fs.existsSync(path.join(costConfigDir, "cost-settings.json")));
 assert.equal(fs.existsSync(path.join(costSessionsRoot, "cost-settings.json")), false);
 assert.deepEqual(fs.readdirSync(costSessionsRoot), []);
@@ -131,9 +135,32 @@ assert.deepEqual(fs.readdirSync(costSessionsRoot), []);
 const reloadedCostSettings = new CostSettingsStore({ configDir: costConfigDir }).getSettings();
 assert.deepEqual(reloadedCostSettings, savedCostSettings);
 
-const clearedCostSettings = costStore.saveSettings({ costPackage: null });
+assert.throws(() => costStore.saveSettings({
+  packages: [{ id: "bad-package", name: "bad", amount: -1, currency: "CNY" }],
+  activePackageId: "bad-package"
+}));
+assert.deepEqual(new CostSettingsStore({ configDir: costConfigDir }).getSettings(), savedCostSettings);
+assert.throws(() => costStore.saveSettings({
+  packages: [{ id: "bad-currency", name: "bad", amount: 1, currency: "NOT-A-CURRENCY" }],
+  activePackageId: "bad-currency"
+}));
+assert.deepEqual(new CostSettingsStore({ configDir: costConfigDir }).getSettings(), savedCostSettings);
+
+const editedCostSettings = costStore.saveSettings({
+  packages: [
+    { id: "package-5x", name: "5x Plus", amount: 880, currency: "CNY" },
+    { id: "package-20x", name: "20x", amount: 1280, currency: "CNY" }
+  ],
+  activePackageId: "package-5x"
+});
+assert.equal(editedCostSettings.activePackageId, "package-5x");
+assert.equal(editedCostSettings.activePackage.name, "5x Plus");
+assert.equal(editedCostSettings.activePackage.amount, 880);
+
+const clearedCostSettings = costStore.saveSettings({ packages: [], activePackageId: "" });
 assert.equal(clearedCostSettings.configured, false);
 assert.equal(clearedCostSettings.costPackage, null);
+assert.equal(clearedCostSettings.activePackage, null);
 
 const reader = new UsageReader({ codexHome: fixture.root, sessionsRoot: fixture.sessionsRoot });
 const progressEvents = [];

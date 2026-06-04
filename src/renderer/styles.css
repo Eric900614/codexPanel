@@ -809,7 +809,7 @@ h1 {
 .settings-modal {
   width: min(420px, 100%);
   display: grid;
-  gap: 14px;
+  gap: 12px;
   padding: 18px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
@@ -835,6 +835,81 @@ h1 {
   cursor: pointer;
   font-size: 21px;
   line-height: 1;
+}
+
+.package-list {
+  display: grid;
+  gap: 8px;
+  max-height: 190px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.package-empty {
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.package-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.package-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+}
+
+.package-choice input {
+  accent-color: var(--cyan);
+}
+
+.package-choice strong,
+.package-choice small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.package-choice strong {
+  font-size: 13px;
+}
+
+.package-choice small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.text-button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.text-button:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
 }
 
 .field-row {
