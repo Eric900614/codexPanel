@@ -371,3 +371,23 @@ fs.appendFileSync(
 );
 const completedPartialSnapshot = incrementalReader.reconcileIncremental();
 assert.equal(completedPartialSnapshot.totals.totalTokens, 3600);
+
+const initialPartialFixture = createFixture();
+const initialPartialReader = new UsageReader({
+  codexHome: initialPartialFixture.root,
+  sessionsRoot: initialPartialFixture.sessionsRoot
+});
+const initialPartialAlphaPath = path.join(
+  initialPartialFixture.sessionsRoot,
+  "2026",
+  "06",
+  "rollout-a-b-c-alpha.jsonl"
+);
+const initialPartialLine = JSON.stringify(tokenCountEvent(new Date().toISOString(), 3000, 600));
+fs.appendFileSync(initialPartialAlphaPath, `\n${initialPartialLine.slice(0, 40)}`, "utf8");
+const initialPartialSnapshot = initialPartialReader.reconcileFull();
+assert.equal(initialPartialSnapshot.totals.totalTokens, 2400);
+
+fs.appendFileSync(initialPartialAlphaPath, `${initialPartialLine.slice(40)}\n`, "utf8");
+const completedInitialPartialSnapshot = initialPartialReader.reconcileIncremental();
+assert.equal(completedInitialPartialSnapshot.totals.totalTokens, 4200);

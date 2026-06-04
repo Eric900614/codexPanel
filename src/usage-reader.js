@@ -159,9 +159,10 @@ function applySessionEvent(session, event, stat) {
 function parseJsonlIntoSession(session, text, stat, options = {}) {
   const combined = `${options.partialLine || ""}${text}`;
   const lines = combined.split("\n");
-  const partialLine = options.bufferPartialLine && !combined.endsWith("\n")
+  const trailingLine = options.bufferPartialLine && !combined.endsWith("\n")
     ? lines.pop()
-    : "";
+    : null;
+  let partialLine = "";
   let parseErrorCount = 0;
 
   for (const rawLine of lines) {
@@ -177,6 +178,17 @@ function parseJsonlIntoSession(session, text, stat, options = {}) {
     }
 
     applySessionEvent(session, event, stat);
+  }
+
+  if (trailingLine !== null) {
+    const line = trailingLine.endsWith("\r") ? trailingLine.slice(0, -1) : trailingLine;
+    if (line.trim()) {
+      try {
+        applySessionEvent(session, JSON.parse(line), stat);
+      } catch {
+        partialLine = trailingLine;
+      }
+    }
   }
 
   session.parseErrorCount = (session.parseErrorCount || 0) + parseErrorCount;
@@ -406,14 +418,16 @@ class UsageReader {
     }
 
     const session = createSession(filePath, stat);
-    parseJsonlIntoSession(session, text, stat);
+    const parseResult = parseJsonlIntoSession(session, text, stat, {
+      bufferPartialLine: true
+    });
     finishSessionIdentity(session, filePath);
 
     this.cache.set(filePath, {
       mtimeMs: stat.mtimeMs,
       size: stat.size,
       offset: stat.size,
-      partialLine: "",
+      partialLine: parseResult.partialLine,
       session
     });
 
