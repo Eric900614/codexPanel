@@ -93,6 +93,83 @@ app.whenReady().then(async () => {
   assert(uiState.scrollWidth <= uiState.viewportWidth, "dashboard should not have a horizontal scrollbar");
   assert(uiState.scrollHeight <= uiState.viewportHeight, "dashboard should not have a vertical scrollbar");
 
+  const settingsUiState = await window.webContents.executeJavaScript(`(async () => {
+    document.getElementById("costSettingsButton")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const overlay = document.getElementById("costSettingsOverlay");
+    const appText = document.getElementById("app")?.innerText?.trim() || "";
+    return {
+      visible: Boolean(overlay && !overlay.hidden && overlay.offsetHeight > 0),
+      hasPackageList: Boolean(document.getElementById("costPackageList")),
+      hasCurrencyInput: Boolean(document.getElementById("costPackageCurrency")),
+      appTextLength: appText.length
+    };
+  })()`);
+
+  assert.equal(settingsUiState.visible, true, "cost settings should open from the toolbar");
+  assert.equal(settingsUiState.hasPackageList, true, "cost settings should manage a package list");
+  assert.equal(settingsUiState.hasCurrencyInput, true, "cost settings should allow editing package currency");
+  assert(settingsUiState.appTextLength > 80, "token dashboard should remain rendered while settings are open");
+
+  const packageUiState = await window.webContents.executeJavaScript(`(async () => {
+    const wait = (ms = 180) => new Promise((resolve) => setTimeout(resolve, ms));
+    const submit = async () => {
+      document.getElementById("costSettingsForm").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await wait();
+    };
+    const setValue = (id, value) => {
+      const node = document.getElementById(id);
+      node.value = value;
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+
+    setValue("costPackageName", "5x");
+    setValue("costPackageAmount", "780");
+    setValue("costPackageCurrency", "CNY");
+    await submit();
+
+    document.getElementById("newCostPackageButton").click();
+    await wait(80);
+    setValue("costPackageName", "20x");
+    setValue("costPackageAmount", "1280");
+    setValue("costPackageCurrency", "CNY");
+    await submit();
+
+    const twentyRadio = Array.from(document.querySelectorAll("input[name='activeCostPackage']"))
+      .find((radio) => radio.closest(".package-row")?.innerText.includes("20x"));
+    twentyRadio.click();
+    twentyRadio.dispatchEvent(new Event("change", { bubbles: true }));
+    await wait();
+
+    const twentyEdit = Array.from(document.querySelectorAll("[data-action='edit-package']"))
+      .find((button) => button.closest(".package-row")?.innerText.includes("20x"));
+    twentyEdit.click();
+    await wait(80);
+    setValue("costPackageName", "20x Pro");
+    await submit();
+
+    setValue("costPackageAmount", "-1");
+    await submit();
+
+    const appText = document.getElementById("app")?.innerText || "";
+    const listText = document.getElementById("costPackageList")?.innerText || "";
+    const messageText = document.getElementById("costSettingsMessage")?.innerText || "";
+    const overlay = document.getElementById("costSettingsOverlay");
+    return {
+      activeSummaryVisible: appText.includes("20x Pro"),
+      listShowsBothPackages: listText.includes("5x") && listText.includes("20x Pro"),
+      invalidInputRejected: messageText.length > 0 && appText.includes("20x Pro"),
+      overlayVisible: Boolean(overlay && !overlay.hidden && overlay.offsetHeight > 0),
+      listText,
+      formName: document.getElementById("costPackageName")?.value || "",
+      appText
+    };
+  })()`);
+  assert.equal(packageUiState.activeSummaryVisible, true, "active package should update the dashboard without restart");
+  assert.equal(packageUiState.listShowsBothPackages, true, "settings should show created and edited packages");
+  assert.equal(packageUiState.invalidInputRejected, true, "invalid package input should not corrupt saved settings");
+  assert.equal(packageUiState.overlayVisible, true, "cost settings should remain visible for final screenshot");
+
   window.webContents.send("usage:syncProgress", {
     state: "idle",
     phase: "idle",
@@ -114,6 +191,7 @@ app.whenReady().then(async () => {
   assert.match(degradedState.statusText, /降级|重试/, "status pill should show degraded retry state");
   assert(degradedState.appTextLength > 80, "existing snapshot should remain visible during degraded state");
 
+  await new Promise((resolve) => setTimeout(resolve, 250));
   const image = await window.webContents.capturePage();
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, image.toPNG());

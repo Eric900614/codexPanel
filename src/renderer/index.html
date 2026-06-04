@@ -47,6 +47,8 @@
           <h2>成本设置</h2>
           <button id="closeCostSettingsButton" class="icon-button" type="button" aria-label="关闭">×</button>
         </div>
+        <div id="costPackageList" class="package-list" aria-label="成本套餐列表"></div>
+        <input id="costPackageId" type="hidden">
         <label class="field-row">
           <span>套餐名称</span>
           <input id="costPackageName" type="text" autocomplete="off" placeholder="5x">
@@ -55,10 +57,15 @@
           <span>套餐金额</span>
           <input id="costPackageAmount" type="number" min="0" step="1" inputmode="decimal" placeholder="780">
         </label>
+        <label class="field-row">
+          <span>币种</span>
+          <input id="costPackageCurrency" type="text" autocomplete="off" maxlength="8" placeholder="CNY">
+        </label>
         <p id="costSettingsMessage" class="form-message"></p>
         <div class="modal-actions">
-          <button id="clearCostSettingsButton" class="ghost-button" type="button">清除套餐</button>
-          <button class="ghost-button primary-button" type="submit">保存</button>
+          <button id="newCostPackageButton" class="ghost-button" type="button">新建</button>
+          <button id="clearCostSettingsButton" class="ghost-button" type="button">清空</button>
+          <button class="ghost-button primary-button" type="submit">保存套餐</button>
         </div>
       </form>
     </section>
