@@ -8,6 +8,15 @@ const outputPath = process.env.CODEX_PANEL_SCREENSHOT_PATH ||
   path.join(__dirname, "..", "artifacts", "codex-panel.png");
 
 ipcMain.handle("usage:getSnapshot", () => reader.getSnapshot());
+ipcMain.handle("usage:refreshFull", () => reader.reconcileFull({
+  onProgress: (progress) => {
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) {
+        window.webContents.send("usage:syncProgress", progress);
+      }
+    });
+  }
+}));
 ipcMain.handle("usage:getConfig", () => ({
   codexHome: getDefaultCodexHome(),
   platform: process.platform

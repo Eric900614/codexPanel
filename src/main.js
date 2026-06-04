@@ -4,6 +4,14 @@ const { UsageReader, getDefaultCodexHome } = require("./usage-reader");
 
 const reader = new UsageReader();
 
+function publishSyncProgress(progress) {
+  BrowserWindow.getAllWindows().forEach((window) => {
+    if (!window.isDestroyed()) {
+      window.webContents.send("usage:syncProgress", progress);
+    }
+  });
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1160,
@@ -25,6 +33,10 @@ function createWindow() {
 }
 
 ipcMain.handle("usage:getSnapshot", () => reader.getSnapshot());
+
+ipcMain.handle("usage:refreshFull", () => reader.reconcileFull({
+  onProgress: publishSyncProgress
+}));
 
 ipcMain.handle("usage:getConfig", () => ({
   codexHome: getDefaultCodexHome(),

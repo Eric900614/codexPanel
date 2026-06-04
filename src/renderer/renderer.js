@@ -2,10 +2,17 @@ const appNode = document.getElementById("app");
 const liveStatusNode = document.getElementById("liveStatus");
 const refreshButton = document.getElementById("refreshButton");
 const openFolderButton = document.getElementById("openFolderButton");
+const syncProgressNode = document.getElementById("syncProgress");
+const syncProgressMessageNode = document.getElementById("syncProgressMessage");
+const syncProgressCountNode = document.getElementById("syncProgressCount");
+const syncProgressBarNode = document.getElementById("syncProgressBar");
 
 const palette = ["#f0cf64", "#7bdde4", "#a994f1", "#91d4bd", "#ed82a4", "#9ea8bd"];
 const hasBridge = Boolean(window.codexPanel);
 let refreshTimer = null;
+let latestSnapshot = null;
+let manualRefreshRunning = false;
+let unsubscribeSyncProgress = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -28,6 +35,56 @@ function formatTokenShort(value) {
 
 function formatRaw(value) {
   return new Intl.NumberFormat("zh-CN").format(Math.round(Number(value) || 0));
+}
+
+function progressPercent(progress) {
+  if (progress.totalFileCount > 0) {
+    return clamp((progress.processedFileCount / progress.totalFileCount) * 100, 0, 100);
+  }
+  if (progress.state === "idle") return 100;
+  return progress.state === "scanning" ? 12 : 0;
+}
+
+function formatSyncMessage(progress) {
+  if (progress.phase === "error") {
+    return progress.message || "同步失败";
+  }
+  if (progress.state === "scanning") {
+    if (Number.isFinite(progress.totalFileCount)) {
+      return `找到 ${formatRaw(progress.totalFileCount)} 个文件`;
+    }
+    return "正在查找会话文件";
+  }
+  if (progress.state === "reconciling") {
+    return `正在同步 ${formatRaw(progress.processedFileCount)} / ${formatRaw(progress.totalFileCount)} 个文件`;
+  }
+  if (progress.state === "idle" && progress.errorCount > 0) {
+    return `同步完成，${formatRaw(progress.errorCount)} 个文件暂时读不到`;
+  }
+  if (progress.state === "idle") return "同步完成";
+  return progress.message || "同步中";
+}
+
+function renderSyncProgress(progress) {
+  if (!syncProgressNode || !progress) return;
+
+  const percent = progressPercent(progress);
+  syncProgressNode.hidden = false;
+  syncProgressNode.classList.toggle("is-idle", progress.state === "idle");
+  syncProgressNode.classList.toggle("has-errors", (progress.errorCount || 0) > 0);
+  syncProgressMessageNode.textContent = formatSyncMessage(progress);
+  syncProgressCountNode.textContent = Number.isFinite(progress.totalFileCount)
+    ? `${formatRaw(progress.processedFileCount)} / ${formatRaw(progress.totalFileCount)}`
+    : "";
+  syncProgressBarNode.style.width = `${percent}%`;
+}
+
+function renderLiveStatus(snapshot) {
+  const errorCount = snapshot.sync?.errorCount || 0;
+  liveStatusNode.textContent = errorCount > 0
+    ? `实时 · ${formatRaw(errorCount)} 个临时错误`
+    : `实时 · ${formatRaw(snapshot.scannedFileCount)} 个文件`;
+  liveStatusNode.classList.toggle("error", errorCount > 0);
 }
 
 function formatPercent(value) {
@@ -257,8 +314,8 @@ function renderRecent(snapshot) {
   return `
     <section class="panel recent-panel sessions-panel">
       <div class="section-header">
-        <h2>最近 Session</h2>
-        <p class="section-kicker">${escapeHtml(formatRaw(snapshot.tokenSessionCount))} 个含 token 记录</p>
+        <h2>最近会话</h2>
+        <p class="section-kicker">${escapeHtml(formatRaw(snapshot.tokenSessionCount))} 条记录</p>
       </div>
       <div class="recent-list">
         ${recentSessions.map((session) => `
@@ -328,6 +385,15 @@ function buildMockSnapshot() {
     tokenSessionCount: 47,
     tokenEventCount: 6673,
     elapsedMs: 18,
+    sync: {
+      state: "idle",
+      phase: "idle",
+      processedFileCount: 92,
+      totalFileCount: 92,
+      message: "Refresh complete.",
+      errorCount: 0
+    },
+    temporaryErrors: [],
     rateLimits: {
       primary: { used_percent: 4, resets_at: Math.floor((Date.now() + 4.5 * 60 * 60 * 1000) / 1000) },
       secondary: { used_percent: 1, resets_at: Math.floor((Date.now() + 6.9 * 24 * 60 * 60 * 1000) / 1000) }
@@ -358,34 +424,96 @@ function buildMockSnapshot() {
 }
 
 async function loadSnapshot() {
+  if (manualRefreshRunning) return;
+
   try {
     const snapshot = hasBridge ? await window.codexPanel.getSnapshot() : buildMockSnapshot();
+    latestSnapshot = snapshot;
     renderSnapshot(snapshot);
-    liveStatusNode.textContent = hasBridge
-      ? `实时 · ${formatRaw(snapshot.scannedFileCount)} files`
-      : "预览";
-    liveStatusNode.classList.remove("error");
+    if (hasBridge) {
+      renderLiveStatus(snapshot);
+    } else {
+      liveStatusNode.textContent = "预览";
+      liveStatusNode.classList.remove("error");
+    }
   } catch (error) {
     liveStatusNode.textContent = "错误";
     liveStatusNode.classList.add("error");
-    appNode.innerHTML = `
-      <section class="panel error-state">
-        <h2>读取失败</h2>
-        <p>${escapeHtml(error.message || error)}</p>
-      </section>
-    `;
+    if (!latestSnapshot) {
+      appNode.innerHTML = `
+        <section class="panel error-state">
+          <h2>读取失败</h2>
+          <p>${escapeHtml(error.message || error)}</p>
+        </section>
+      `;
+    }
   }
 }
 
-refreshButton.addEventListener("click", loadSnapshot);
+async function runManualRefresh() {
+  if (manualRefreshRunning) return;
+
+  manualRefreshRunning = true;
+  refreshButton.disabled = true;
+  renderSyncProgress({
+    state: "scanning",
+    phase: "scanning",
+    processedFileCount: 0,
+    totalFileCount: null,
+    message: "Manual refresh started.",
+    errorCount: 0
+  });
+
+  try {
+    const snapshot = hasBridge ? await window.codexPanel.refreshFull() : buildMockSnapshot();
+    latestSnapshot = snapshot;
+    renderSnapshot(snapshot);
+    renderSyncProgress(snapshot.sync);
+    if (hasBridge) {
+      renderLiveStatus(snapshot);
+    } else {
+      liveStatusNode.textContent = "预览";
+      liveStatusNode.classList.remove("error");
+    }
+  } catch (error) {
+    liveStatusNode.textContent = "同步失败";
+    liveStatusNode.classList.add("error");
+    renderSyncProgress({
+      state: "idle",
+      phase: "error",
+      processedFileCount: 0,
+      totalFileCount: 0,
+      message: error.message || String(error),
+      errorCount: 1
+    });
+    if (!latestSnapshot) {
+      appNode.innerHTML = `
+        <section class="panel error-state">
+          <h2>读取失败</h2>
+          <p>${escapeHtml(error.message || error)}</p>
+        </section>
+      `;
+    }
+  } finally {
+    manualRefreshRunning = false;
+    refreshButton.disabled = false;
+  }
+}
+
+refreshButton.addEventListener("click", runManualRefresh);
 openFolderButton.addEventListener("click", async () => {
   if (!hasBridge) return;
   await window.codexPanel.openCodexHome();
 });
+
+if (hasBridge && typeof window.codexPanel.onSyncProgress === "function") {
+  unsubscribeSyncProgress = window.codexPanel.onSyncProgress(renderSyncProgress);
+}
 
 loadSnapshot();
 refreshTimer = window.setInterval(loadSnapshot, 2500);
 
 window.addEventListener("beforeunload", () => {
   if (refreshTimer) window.clearInterval(refreshTimer);
+  if (unsubscribeSyncProgress) unsubscribeSyncProgress();
 });
