@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const assert = require("node:assert/strict");
+const { CostSettingsStore } = require("../src/cost-settings-store");
 const { UsageReader } = require("../src/usage-reader");
 const { UsageSynchronization } = require("../src/usage-synchronization");
 
@@ -101,6 +102,39 @@ function createFixture() {
 }
 
 const fixture = createFixture();
+
+const costFixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-panel-cost-"));
+const costConfigDir = path.join(costFixtureRoot, "app-config");
+const costSessionsRoot = path.join(costFixtureRoot, "sessions");
+fs.mkdirSync(costSessionsRoot, { recursive: true });
+
+const costStore = new CostSettingsStore({ configDir: costConfigDir });
+const emptyCostSettings = costStore.getSettings();
+assert.equal(emptyCostSettings.version, 1);
+assert.equal(emptyCostSettings.configured, false);
+assert.equal(emptyCostSettings.costPackage, null);
+
+const savedCostSettings = costStore.saveSettings({
+  costPackage: {
+    name: "5x",
+    amountCny: 780,
+    currency: "CNY"
+  }
+});
+assert.equal(savedCostSettings.configured, true);
+assert.equal(savedCostSettings.costPackage.name, "5x");
+assert.equal(savedCostSettings.costPackage.amountCny, 780);
+assert(fs.existsSync(path.join(costConfigDir, "cost-settings.json")));
+assert.equal(fs.existsSync(path.join(costSessionsRoot, "cost-settings.json")), false);
+assert.deepEqual(fs.readdirSync(costSessionsRoot), []);
+
+const reloadedCostSettings = new CostSettingsStore({ configDir: costConfigDir }).getSettings();
+assert.deepEqual(reloadedCostSettings, savedCostSettings);
+
+const clearedCostSettings = costStore.saveSettings({ costPackage: null });
+assert.equal(clearedCostSettings.configured, false);
+assert.equal(clearedCostSettings.costPackage, null);
+
 const reader = new UsageReader({ codexHome: fixture.root, sessionsRoot: fixture.sessionsRoot });
 const progressEvents = [];
 const originalReadFileSync = fs.readFileSync;

@@ -2,6 +2,14 @@ const appNode = document.getElementById("app");
 const liveStatusNode = document.getElementById("liveStatus");
 const refreshButton = document.getElementById("refreshButton");
 const openFolderButton = document.getElementById("openFolderButton");
+const costSettingsButton = document.getElementById("costSettingsButton");
+const costSettingsOverlay = document.getElementById("costSettingsOverlay");
+const costSettingsForm = document.getElementById("costSettingsForm");
+const closeCostSettingsButton = document.getElementById("closeCostSettingsButton");
+const clearCostSettingsButton = document.getElementById("clearCostSettingsButton");
+const costPackageNameInput = document.getElementById("costPackageName");
+const costPackageAmountInput = document.getElementById("costPackageAmount");
+const costSettingsMessageNode = document.getElementById("costSettingsMessage");
 const syncProgressNode = document.getElementById("syncProgress");
 const syncProgressMessageNode = document.getElementById("syncProgressMessage");
 const syncProgressCountNode = document.getElementById("syncProgressCount");
@@ -10,9 +18,11 @@ const syncProgressBarNode = document.getElementById("syncProgressBar");
 const palette = ["#f0cf64", "#7bdde4", "#a994f1", "#91d4bd", "#ed82a4", "#9ea8bd"];
 const hasBridge = Boolean(window.codexPanel);
 let latestSnapshot = null;
+let latestCostSettings = buildUnconfiguredCostSettings();
 let manualRefreshRunning = false;
 let unsubscribeSnapshot = null;
 let unsubscribeSyncProgress = null;
+let unsubscribeCostSettings = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -35,6 +45,27 @@ function formatTokenShort(value) {
 
 function formatRaw(value) {
   return new Intl.NumberFormat("zh-CN").format(Math.round(Number(value) || 0));
+}
+
+function buildUnconfiguredCostSettings() {
+  return {
+    version: 1,
+    configured: false,
+    costPackage: null,
+    updatedAt: null
+  };
+}
+
+function isCostPackageConfigured(settings) {
+  return Boolean(settings?.configured && settings.costPackage);
+}
+
+function formatCurrencyCny(value) {
+  return new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: "CNY",
+    maximumFractionDigits: 0
+  }).format(Number(value) || 0);
 }
 
 function progressPercent(progress) {
@@ -229,12 +260,21 @@ function renderMetricCards(snapshot) {
   `;
 }
 
-function renderTokenBoard(snapshot) {
+function costSummaryText(costSettings) {
+  if (!isCostPackageConfigured(costSettings)) {
+    return "未配置成本套餐";
+  }
+
+  const costPackage = costSettings.costPackage;
+  return `${costPackage.name} ${formatCurrencyCny(costPackage.amountCny)}`;
+}
+
+function renderTokenBoard(snapshot, costSettings = latestCostSettings) {
   return `
     <section class="panel board-panel">
       <div class="section-header">
         <h2>Token 消耗看板</h2>
-        <p class="section-kicker">样本 ${escapeHtml(formatRaw(snapshot.tokenEventCount))}</p>
+        <p class="section-kicker cost-kicker">样本 ${escapeHtml(formatRaw(snapshot.tokenEventCount))} · ${escapeHtml(costSummaryText(costSettings))}</p>
       </div>
       <div class="token-cards">
         ${renderTokenCard("今日", snapshot.totals.todayTokens)}
@@ -398,7 +438,7 @@ function renderSnapshot(snapshot) {
     <div class="single-grid">
       ${renderGauge(snapshot)}
       ${renderMetricCards(snapshot)}
-      ${renderTokenBoard(snapshot)}
+      ${renderTokenBoard(snapshot, latestCostSettings)}
       ${renderDistribution(snapshot)}
       ${renderRecent(snapshot)}
       ${renderModelPanel(snapshot)}
@@ -466,14 +506,32 @@ function renderPushedSnapshot(snapshot) {
   }
 }
 
+function renderCostSettings(settings) {
+  latestCostSettings = settings || buildUnconfiguredCostSettings();
+  if (latestSnapshot) {
+    renderSnapshot(latestSnapshot);
+  }
+}
+
+async function loadCostSettings() {
+  if (hasBridge && typeof window.codexPanel.getCostSettings === "function") {
+    return window.codexPanel.getCostSettings();
+  }
+  return buildUnconfiguredCostSettings();
+}
+
 async function hydrateSnapshot() {
   if (manualRefreshRunning) return;
 
   try {
-    const snapshot = hasBridge && typeof window.codexPanel.getSnapshot === "function"
-      ? await window.codexPanel.getSnapshot()
-      : buildMockSnapshot();
+    const [costSettings, snapshot] = await Promise.all([
+      loadCostSettings(),
+      hasBridge && typeof window.codexPanel.getSnapshot === "function"
+        ? window.codexPanel.getSnapshot()
+        : buildMockSnapshot()
+    ]);
     if (manualRefreshRunning) return;
+    latestCostSettings = costSettings || buildUnconfiguredCostSettings();
     renderPushedSnapshot(snapshot);
     renderSyncProgress(snapshot.sync);
   } catch (error) {
@@ -533,6 +591,67 @@ async function runManualRefresh() {
   }
 }
 
+function openCostSettings() {
+  if (!costSettingsOverlay) return;
+  const costPackage = latestCostSettings?.costPackage;
+  costPackageNameInput.value = costPackage?.name || "";
+  costPackageAmountInput.value = costPackage?.amountCny || "";
+  costSettingsMessageNode.textContent = "";
+  costSettingsOverlay.hidden = false;
+  costPackageNameInput.focus();
+}
+
+function closeCostSettings() {
+  if (!costSettingsOverlay) return;
+  costSettingsOverlay.hidden = true;
+}
+
+async function saveCostSettings(settings) {
+  if (hasBridge && typeof window.codexPanel.saveCostSettings === "function") {
+    return window.codexPanel.saveCostSettings(settings);
+  }
+  return {
+    version: 1,
+    configured: Boolean(settings.costPackage),
+    costPackage: settings.costPackage,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function handleCostSettingsSubmit(event) {
+  event.preventDefault();
+  const name = costPackageNameInput.value.trim() || "成本套餐";
+  const amountCny = Number(costPackageAmountInput.value);
+  if (!Number.isFinite(amountCny) || amountCny <= 0) {
+    costSettingsMessageNode.textContent = "请输入大于 0 的套餐金额";
+    return;
+  }
+
+  try {
+    const saved = await saveCostSettings({
+      costPackage: {
+        name,
+        amountCny,
+        currency: "CNY"
+      }
+    });
+    renderCostSettings(saved);
+    closeCostSettings();
+  } catch (error) {
+    costSettingsMessageNode.textContent = error.message || "保存失败";
+  }
+}
+
+async function clearCostSettings() {
+  try {
+    const saved = await saveCostSettings({ costPackage: null });
+    renderCostSettings(saved);
+    closeCostSettings();
+  } catch (error) {
+    costSettingsMessageNode.textContent = error.message || "清除失败";
+  }
+}
+
 renderSyncProgress({
   state: "scanning",
   phase: "scanning",
@@ -543,6 +662,15 @@ renderSyncProgress({
 });
 
 refreshButton.addEventListener("click", runManualRefresh);
+costSettingsButton.addEventListener("click", openCostSettings);
+closeCostSettingsButton.addEventListener("click", closeCostSettings);
+clearCostSettingsButton.addEventListener("click", clearCostSettings);
+costSettingsForm.addEventListener("submit", handleCostSettingsSubmit);
+costSettingsOverlay.addEventListener("click", (event) => {
+  if (event.target === costSettingsOverlay) {
+    closeCostSettings();
+  }
+});
 openFolderButton.addEventListener("click", async () => {
   if (!hasBridge) return;
   await window.codexPanel.openCodexHome();
@@ -555,9 +683,14 @@ if (hasBridge && typeof window.codexPanel.onSyncProgress === "function") {
 if (hasBridge && typeof window.codexPanel.onSnapshot === "function") {
   unsubscribeSnapshot = window.codexPanel.onSnapshot(renderPushedSnapshot);
 }
+
+if (hasBridge && typeof window.codexPanel.onCostSettings === "function") {
+  unsubscribeCostSettings = window.codexPanel.onCostSettings(renderCostSettings);
+}
 hydrateSnapshot();
 
 window.addEventListener("beforeunload", () => {
   if (unsubscribeSnapshot) unsubscribeSnapshot();
   if (unsubscribeSyncProgress) unsubscribeSyncProgress();
+  if (unsubscribeCostSettings) unsubscribeCostSettings();
 });

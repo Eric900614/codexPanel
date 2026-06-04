@@ -2,10 +2,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
 const { app, BrowserWindow, ipcMain } = require("electron");
+const { CostSettingsStore } = require("../src/cost-settings-store");
 const { UsageReader, getDefaultCodexHome } = require("../src/usage-reader");
 const { UsageSynchronization } = require("../src/usage-synchronization");
 
 const reader = new UsageReader();
+const costSettingsStore = new CostSettingsStore({
+  configDir: fs.mkdtempSync(path.join(app.getPath("temp"), "codex-panel-screenshot-config-"))
+});
 const outputPath = process.env.CODEX_PANEL_SCREENSHOT_PATH ||
   path.join(__dirname, "..", "artifacts", "codex-panel.png");
 const synchronization = new UsageSynchronization({
@@ -36,6 +40,8 @@ ipcMain.handle("usage:getConfig", () => ({
   codexHome: getDefaultCodexHome(),
   platform: process.platform
 }));
+ipcMain.handle("cost:getSettings", () => costSettingsStore.getSettings());
+ipcMain.handle("cost:saveSettings", (_event, settings) => costSettingsStore.saveSettings(settings));
 ipcMain.handle("usage:openCodexHome", () => ({ ok: true, message: "" }));
 
 app.whenReady().then(async () => {
@@ -66,6 +72,8 @@ app.whenReady().then(async () => {
       progressText,
       progressCount,
       statusText,
+      showsNoCostPackage: appText.includes("未配置成本套餐"),
+      showsTokenBoard: appText.includes("Token 消耗看板"),
       appTextLength: appText.length,
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
@@ -80,6 +88,8 @@ app.whenReady().then(async () => {
   assert.match(uiState.statusText, phasePattern, "status pill should name the sync phase");
   assert(uiState.progressCount || /监听|已同步|重试|降级/.test(uiState.progressText), "progress should show counts when useful");
   assert(uiState.appTextLength > 80, "dashboard should not be blank");
+  assert.equal(uiState.showsNoCostPackage, true, "dashboard should show the no-cost-package state");
+  assert.equal(uiState.showsTokenBoard, true, "token dashboard should remain visible without a cost package");
   assert(uiState.scrollWidth <= uiState.viewportWidth, "dashboard should not have a horizontal scrollbar");
   assert(uiState.scrollHeight <= uiState.viewportHeight, "dashboard should not have a vertical scrollbar");
 
