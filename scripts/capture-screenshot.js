@@ -148,6 +148,14 @@ app.whenReady().then(async () => {
     setValue("costPackageName", "20x Pro");
     await submit();
 
+    const fiveEdit = Array.from(document.querySelectorAll("[data-action='edit-package']"))
+      .find((button) => button.closest(".package-row")?.innerText.includes("5x"));
+    fiveEdit.click();
+    await wait(80);
+    setValue("costPackageAmount", "790");
+    await submit();
+    const appTextAfterInactiveEdit = document.getElementById("app")?.innerText || "";
+
     setValue("costPackageAmount", "-1");
     await submit();
 
@@ -157,6 +165,7 @@ app.whenReady().then(async () => {
     const overlay = document.getElementById("costSettingsOverlay");
     return {
       activeSummaryVisible: appText.includes("20x Pro"),
+      inactiveEditPreservedActive: appTextAfterInactiveEdit.includes("20x Pro"),
       listShowsBothPackages: listText.includes("5x") && listText.includes("20x Pro"),
       invalidInputRejected: messageText.length > 0 && appText.includes("20x Pro"),
       overlayVisible: Boolean(overlay && !overlay.hidden && overlay.offsetHeight > 0),
@@ -166,6 +175,7 @@ app.whenReady().then(async () => {
     };
   })()`);
   assert.equal(packageUiState.activeSummaryVisible, true, "active package should update the dashboard without restart");
+  assert.equal(packageUiState.inactiveEditPreservedActive, true, "editing an inactive package should not switch the active package");
   assert.equal(packageUiState.listShowsBothPackages, true, "settings should show created and edited packages");
   assert.equal(packageUiState.invalidInputRejected, true, "invalid package input should not corrupt saved settings");
   assert.equal(packageUiState.overlayVisible, true, "cost settings should remain visible for final screenshot");

@@ -140,6 +140,11 @@ assert.throws(() => costStore.saveSettings({
   activePackageId: "bad-package"
 }));
 assert.deepEqual(new CostSettingsStore({ configDir: costConfigDir }).getSettings(), savedCostSettings);
+assert.throws(() => costStore.saveSettings({
+  packages: [{ id: "bad-currency", name: "bad", amount: 1, currency: "NOT-A-CURRENCY" }],
+  activePackageId: "bad-currency"
+}));
+assert.deepEqual(new CostSettingsStore({ configDir: costConfigDir }).getSettings(), savedCostSettings);
 
 const editedCostSettings = costStore.saveSettings({
   packages: [

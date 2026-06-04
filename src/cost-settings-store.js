@@ -22,7 +22,16 @@ function safePackageId(value, fallback) {
 }
 
 function normalizeCurrency(value) {
-  return String(value || "CNY").trim().toUpperCase() || "CNY";
+  const currency = String(value || "CNY").trim().toUpperCase() || "CNY";
+  try {
+    new Intl.NumberFormat("zh-CN", {
+      style: "currency",
+      currency
+    }).format(1);
+  } catch {
+    throw new Error("Cost package currency must be a supported currency code.");
+  }
+  return currency;
 }
 
 function normalizeCostPackage(costPackage, index = 0) {

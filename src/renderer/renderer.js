@@ -79,6 +79,18 @@ function formatCurrency(value, currency = "CNY") {
   }
 }
 
+function isSupportedCurrency(currency) {
+  try {
+    new Intl.NumberFormat("zh-CN", {
+      style: "currency",
+      currency
+    }).format(1);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function progressPercent(progress) {
   if (progress.totalFileCount > 0) {
     return clamp((progress.processedFileCount / progress.totalFileCount) * 100, 0, 100);
@@ -693,17 +705,25 @@ async function handleCostSettingsSubmit(event) {
     costSettingsMessageNode.textContent = "请输入大于 0 的套餐金额";
     return;
   }
+  if (!isSupportedCurrency(currency)) {
+    costSettingsMessageNode.textContent = "请输入有效的币种代码";
+    return;
+  }
 
   const id = costPackageIdInput.value || makeCostPackageId(name);
   const packages = currentCostPackages();
+  const isExistingPackage = packages.some((costPackage) => costPackage.id === id);
   const nextPackage = { id, name, amount, currency };
-  const nextPackages = packages.some((costPackage) => costPackage.id === id)
+  const nextPackages = isExistingPackage
     ? packages.map((costPackage) => (costPackage.id === id ? nextPackage : costPackage))
     : [...packages, nextPackage];
+  const nextActivePackageId = isExistingPackage
+    ? (activeCostPackageId() || id)
+    : id;
   try {
     const saved = await saveCostSettings({
       packages: nextPackages,
-      activePackageId: id
+      activePackageId: nextActivePackageId
     });
     renderCostSettings(saved);
     fillCostPackageForm(nextPackage);
