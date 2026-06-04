@@ -123,6 +123,21 @@ function formatCycleRange(costCycle) {
   return `${label} ${costCycle.effectiveStartDate || costCycle.startDate || "--"} 至 ${costCycle.effectiveEndDate || costCycle.endDate || "--"}`;
 }
 
+function formatCompactDate(value, omitYear = false) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return value || "--";
+  return omitYear ? `${match[2]}/${match[3]}` : `${match[1]}/${match[2]}/${match[3]}`;
+}
+
+function formatCompactCycleRange(costCycle) {
+  if (!costCycle) return "";
+  const label = costCycle.mode === "naturalMonth" ? "自然月" : "自定义";
+  const startDate = costCycle.effectiveStartDate || costCycle.startDate || "";
+  const endDate = costCycle.effectiveEndDate || costCycle.endDate || "";
+  const sameYear = startDate.slice(0, 4) && startDate.slice(0, 4) === endDate.slice(0, 4);
+  return `${label} ${formatCompactDate(startDate)}-${formatCompactDate(endDate, sameYear)}`;
+}
+
 function progressPercent(progress) {
   if (progress.totalFileCount > 0) {
     return clamp((progress.processedFileCount / progress.totalFileCount) * 100, 0, 100);
@@ -350,31 +365,51 @@ function costUnavailableText(reason) {
   return "暂不可用";
 }
 
+function costUnavailableActionText(reason) {
+  if (reason === "no-active-package") return "去设置成本套餐";
+  if (reason === "invalid-cost-cycle") return "调整成本周期";
+  if (reason === "invalid-cost-settings") return "检查成本配置";
+  return "";
+}
+
 function renderCostEstimate(costEstimate) {
   if (!costEstimate || !costEstimate.available) {
+    const actionText = costUnavailableActionText(costEstimate?.reason);
     return `
-      <div class="cost-estimate is-unavailable">
-        <p class="cost-estimate-label">分摊成本</p>
-        <p class="cost-estimate-main">成本估算不可用</p>
-        <p class="cost-estimate-sub">${escapeHtml(costUnavailableText(costEstimate?.reason))}</p>
+      <div class="cost-estimate is-unavailable ${actionText ? "has-action" : ""}">
+        <div>
+          <p class="cost-estimate-label">成本估算</p>
+          <p class="cost-estimate-main">成本估算不可用</p>
+          <p class="cost-estimate-sub">${escapeHtml(costUnavailableText(costEstimate?.reason))}</p>
+        </div>
+        ${actionText ? `<button class="cost-setup-entry" type="button" data-action="open-cost-settings">${escapeHtml(actionText)}</button>` : ""}
       </div>
     `;
   }
 
   const projects = costEstimate.projects.slice(0, 2);
+  const cycleText = formatCycleRange(costEstimate.cycle);
+  const compactCycleText = formatCompactCycleRange(costEstimate.cycle);
+  const packageText = `${costEstimate.packageName} ${formatCurrency(costEstimate.packageAmount, costEstimate.currency)}`;
   return `
     <div class="cost-estimate">
-      <div class="cost-estimate-head">
+      <div class="cost-home-summary">
         <div>
           <p class="cost-estimate-label">分摊成本</p>
           <p class="cost-estimate-main">${escapeHtml(formatCurrency(costEstimate.totalAllocatedCost, costEstimate.currency))}</p>
         </div>
-        <p class="cost-estimate-sub">周期 Token ${escapeHtml(formatTokenShort(costEstimate.cycleTotalTokens))}</p>
+        <div class="cost-home-meta">
+          <span>${escapeHtml(packageText)}</span>
+          <span title="${escapeHtml(cycleText)}">${escapeHtml(compactCycleText)}</span>
+        </div>
       </div>
       <div class="cost-project-list">
         ${projects.map((project) => `
           <div class="cost-project-row">
-            <span>${escapeHtml(project.project)}</span>
+            <span class="cost-project-main">
+              <span class="cost-project-name">${escapeHtml(project.project)}</span>
+              <small class="cost-project-token">${escapeHtml(formatTokenShort(project.tokens))} Token · ${escapeHtml(formatPercent(project.share * 100))}</small>
+            </span>
             <strong>${escapeHtml(formatCurrency(project.allocatedCost, costEstimate.currency))}</strong>
           </div>
         `).join("")}
@@ -955,6 +990,11 @@ renderSyncProgress({
 
 refreshButton.addEventListener("click", runManualRefresh);
 costSettingsButton.addEventListener("click", openCostSettings);
+appNode.addEventListener("click", (event) => {
+  if (event.target.closest("[data-action='open-cost-settings']")) {
+    openCostSettings();
+  }
+});
 closeCostSettingsButton.addEventListener("click", closeCostSettings);
 clearCostSettingsButton.addEventListener("click", clearCostSettings);
 newCostPackageButton.addEventListener("click", () => fillCostPackageForm(null));
