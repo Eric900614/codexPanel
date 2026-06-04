@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codex 码表</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar" aria-label="Codex usage status">
+        <div>
+          <p class="eyebrow">LOCAL CODEX METER</p>
+          <h1>Codex 码表</h1>
+        </div>
+        <div class="top-actions">
+          <span id="liveStatus" class="status-pill">读取中</span>
+          <button id="refreshButton" class="ghost-button" type="button">刷新</button>
+          <button id="openFolderButton" class="ghost-button" type="button">打开目录</button>
+        </div>
+      </section>
+
+      <section id="app" class="dashboard" aria-live="polite">
+        <div class="skeleton hero-skeleton"></div>
+        <div class="skeleton-grid">
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

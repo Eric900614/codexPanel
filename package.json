@@ -1,0 +1,15 @@
+{
+  "name": "codex-panel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows desktop dashboard for local Codex token usage and rate-limit windows.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "node scripts/smoke-usage-reader.js",
+    "screenshot": "electron scripts/capture-screenshot.js"
+  },
+  "devDependencies": {
+    "electron": "^31.7.0"
+  }
+}
