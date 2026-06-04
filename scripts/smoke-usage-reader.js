@@ -3,6 +3,7 @@ const os = require("node:os");
 const path = require("node:path");
 const assert = require("node:assert/strict");
 const { UsageReader } = require("../src/usage-reader");
+const { UsageSynchronization } = require("../src/usage-synchronization");
 
 function writeJsonl(filePath, events) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -219,3 +220,55 @@ assert.equal(cachedErrorSnapshot.temporaryErrors.length, 1);
 assert.equal(cachedErrorSnapshot.temporaryErrors[0].fileName, "rollout-a-b-c-alpha.jsonl");
 assert.equal(cachedProgressEvents.at(-1).state, "idle");
 assert.equal(cachedProgressEvents.at(-1).errorCount, 1);
+
+const pushedSnapshots = [];
+const pushedProgressEvents = [];
+const fakeReader = {
+  nextSnapshotId: 1,
+  reconcileFull({ onProgress } = {}) {
+    onProgress?.({
+      state: "scanning",
+      phase: "scanning",
+      processedFileCount: 0,
+      totalFileCount: null,
+      message: "Scanning.",
+      errorCount: 0
+    });
+    onProgress?.({
+      state: "idle",
+      phase: "idle",
+      processedFileCount: 1,
+      totalFileCount: 1,
+      message: "Done.",
+      errorCount: 0
+    });
+    return {
+      exists: true,
+      scannedFileCount: this.nextSnapshotId,
+      sync: {
+        state: "idle",
+        phase: "idle",
+        processedFileCount: 1,
+        totalFileCount: 1,
+        message: "Done.",
+        errorCount: 0
+      },
+      marker: `snapshot-${this.nextSnapshotId++}`
+    };
+  }
+};
+const synchronization = new UsageSynchronization({
+  reader: fakeReader,
+  publishSnapshot: (snapshot) => pushedSnapshots.push(snapshot),
+  publishProgress: (progress) => pushedProgressEvents.push(progress)
+});
+
+synchronization.start();
+assert.equal(pushedSnapshots.length, 1);
+assert.equal(pushedSnapshots[0].marker, "snapshot-1");
+assert(pushedProgressEvents.some((event) => event.state === "scanning"));
+assert(pushedProgressEvents.some((event) => event.state === "idle"));
+
+synchronization.refreshFull();
+assert.equal(pushedSnapshots.length, 2);
+assert.equal(pushedSnapshots[1].marker, "snapshot-2");

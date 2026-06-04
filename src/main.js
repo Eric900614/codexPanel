@@ -1,8 +1,22 @@
 const path = require("node:path");
 const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const { UsageReader, getDefaultCodexHome } = require("./usage-reader");
+const { UsageSynchronization } = require("./usage-synchronization");
 
 const reader = new UsageReader();
+const synchronization = new UsageSynchronization({
+  reader,
+  publishSnapshot,
+  publishProgress: publishSyncProgress
+});
+
+function publishSnapshot(snapshot) {
+  BrowserWindow.getAllWindows().forEach((window) => {
+    if (!window.isDestroyed()) {
+      window.webContents.send("usage:snapshot", snapshot);
+    }
+  });
+}
 
 function publishSyncProgress(progress) {
   BrowserWindow.getAllWindows().forEach((window) => {
@@ -29,14 +43,15 @@ function createWindow() {
   });
 
   window.loadFile(path.join(__dirname, "renderer", "index.html"));
+  window.webContents.once("did-finish-load", () => {
+    synchronization.start();
+  });
   return window;
 }
 
-ipcMain.handle("usage:getSnapshot", () => reader.getSnapshot());
+ipcMain.handle("usage:getSnapshot", () => synchronization.getLatestSnapshot() || reader.getSnapshot());
 
-ipcMain.handle("usage:refreshFull", () => reader.reconcileFull({
-  onProgress: publishSyncProgress
-}));
+ipcMain.handle("usage:refreshFull", () => synchronization.refreshFull());
 
 ipcMain.handle("usage:getConfig", () => ({
   codexHome: getDefaultCodexHome(),
