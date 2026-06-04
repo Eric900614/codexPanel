@@ -46,6 +46,9 @@ function progressPercent(progress) {
 }
 
 function formatSyncMessage(progress) {
+  if (progress.phase === "error") {
+    return progress.message || "同步失败";
+  }
   if (progress.state === "scanning") {
     if (Number.isFinite(progress.totalFileCount)) {
       return `找到 ${formatRaw(progress.totalFileCount)} 个文件`;

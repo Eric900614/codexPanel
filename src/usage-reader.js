@@ -119,6 +119,17 @@ class UsageReader {
 
     const sessions = [];
     let errorCount = 0;
+    if (files.length === 0) {
+      emitProgress(onProgress, {
+        state: "reconciling",
+        phase: "reconciling",
+        processedFileCount: 0,
+        totalFileCount: 0,
+        message: "No session files to parse.",
+        errorCount: 0
+      });
+    }
+
     files.forEach((filePath, index) => {
       const session = this.parseSession(filePath);
       if (session) {
@@ -176,13 +187,7 @@ class UsageReader {
     try {
       text = fs.readFileSync(filePath, "utf8");
     } catch (error) {
-      return {
-        filePath,
-        fileName: path.basename(filePath),
-        error: error.message,
-        updatedAt: stat.mtimeMs,
-        totalTokens: 0
-      };
+      return buildReadErrorSession(filePath, stat, error, cached);
     }
 
     const session = {
@@ -290,6 +295,27 @@ class UsageReader {
 
 function emitProgress(onProgress, progress) {
   if (onProgress) onProgress(progress);
+}
+
+function buildReadErrorSession(filePath, stat, error, cached) {
+  const fallback = cached?.session;
+  if (fallback) {
+    return {
+      ...fallback,
+      filePath,
+      fileName: path.basename(filePath),
+      error: error.message,
+      updatedAt: Math.max(fallback.updatedAt || 0, stat.mtimeMs || 0)
+    };
+  }
+
+  return {
+    filePath,
+    fileName: path.basename(filePath),
+    error: error.message,
+    updatedAt: stat.mtimeMs,
+    totalTokens: 0
+  };
 }
 
 function latestRateLimit(sessions) {

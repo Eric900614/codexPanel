@@ -163,3 +163,59 @@ assert.deepEqual(
     errorCount: 1
   }
 );
+
+const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-panel-empty-"));
+const emptySessionsRoot = path.join(emptyRoot, "sessions");
+fs.mkdirSync(emptySessionsRoot, { recursive: true });
+const emptyProgressEvents = [];
+const emptySnapshot = new UsageReader({ codexHome: emptyRoot, sessionsRoot: emptySessionsRoot }).reconcileFull({
+  onProgress: (progress) => emptyProgressEvents.push(progress)
+});
+
+assert.equal(emptySnapshot.exists, true);
+assert.equal(emptySnapshot.scannedFileCount, 0);
+assert(emptyProgressEvents.some((event) => event.state === "scanning"));
+assert(emptyProgressEvents.some((event) => (
+  event.state === "reconciling" &&
+  event.processedFileCount === 0 &&
+  event.totalFileCount === 0
+)));
+assert(emptyProgressEvents.some((event) => event.state === "idle"));
+
+const cachedFixture = createFixture();
+const cachedReader = new UsageReader({
+  codexHome: cachedFixture.root,
+  sessionsRoot: cachedFixture.sessionsRoot
+});
+const cachedInitialSnapshot = cachedReader.reconcileFull();
+const cachedAlphaPath = path.join(cachedFixture.sessionsRoot, "2026", "06", "rollout-a-b-c-alpha.jsonl");
+const cachedProgressEvents = [];
+
+assert.equal(cachedInitialSnapshot.totals.totalTokens, 2400);
+fs.appendFileSync(cachedAlphaPath, "\n", "utf8");
+
+fs.readFileSync = function readCachedFixtureFile(filePath, ...args) {
+  if (String(filePath).endsWith("alpha.jsonl")) {
+    const error = new Error("temporary busy");
+    error.code = "EBUSY";
+    throw error;
+  }
+  return originalReadFileSync.call(fs, filePath, ...args);
+};
+
+let cachedErrorSnapshot;
+try {
+  cachedErrorSnapshot = cachedReader.reconcileFull({
+    onProgress: (progress) => cachedProgressEvents.push(progress)
+  });
+} finally {
+  fs.readFileSync = originalReadFileSync;
+}
+
+assert.equal(cachedErrorSnapshot.totals.totalTokens, 2400);
+assert.equal(cachedErrorSnapshot.tokenSessionCount, 3);
+assert.equal(cachedErrorSnapshot.sync.errorCount, 1);
+assert.equal(cachedErrorSnapshot.temporaryErrors.length, 1);
+assert.equal(cachedErrorSnapshot.temporaryErrors[0].fileName, "rollout-a-b-c-alpha.jsonl");
+assert.equal(cachedProgressEvents.at(-1).state, "idle");
+assert.equal(cachedProgressEvents.at(-1).errorCount, 1);
