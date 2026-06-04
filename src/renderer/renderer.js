@@ -337,7 +337,49 @@ function renderTokenBoard(snapshot, costSettings = latestCostSettings) {
         ${renderTokenCard("近 7 天", snapshot.totals.weekTokens)}
         ${renderTokenCard("本月", snapshot.totals.monthTokens)}
       </div>
+      ${renderCostEstimate(snapshot.costEstimate)}
     </section>
+  `;
+}
+
+function costUnavailableText(reason) {
+  if (reason === "no-active-package") return "未配置成本套餐";
+  if (reason === "zero-cycle-tokens") return "当前周期没有 Token";
+  if (reason === "invalid-cost-cycle") return "成本周期无效";
+  if (reason === "invalid-cost-settings") return "成本配置无效";
+  return "暂不可用";
+}
+
+function renderCostEstimate(costEstimate) {
+  if (!costEstimate || !costEstimate.available) {
+    return `
+      <div class="cost-estimate is-unavailable">
+        <p class="cost-estimate-label">分摊成本</p>
+        <p class="cost-estimate-main">成本估算不可用</p>
+        <p class="cost-estimate-sub">${escapeHtml(costUnavailableText(costEstimate?.reason))}</p>
+      </div>
+    `;
+  }
+
+  const projects = costEstimate.projects.slice(0, 2);
+  return `
+    <div class="cost-estimate">
+      <div class="cost-estimate-head">
+        <div>
+          <p class="cost-estimate-label">分摊成本</p>
+          <p class="cost-estimate-main">${escapeHtml(formatCurrency(costEstimate.totalAllocatedCost, costEstimate.currency))}</p>
+        </div>
+        <p class="cost-estimate-sub">周期 Token ${escapeHtml(formatTokenShort(costEstimate.cycleTotalTokens))}</p>
+      </div>
+      <div class="cost-project-list">
+        ${projects.map((project) => `
+          <div class="cost-project-row">
+            <span>${escapeHtml(project.project)}</span>
+            <strong>${escapeHtml(formatCurrency(project.allocatedCost, costEstimate.currency))}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </div>
   `;
 }
 

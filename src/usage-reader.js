@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const { normalizeCostSettings } = require("./cost-settings-store");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -227,6 +228,7 @@ class UsageReader {
   constructor(options = {}) {
     this.codexHome = options.codexHome || getDefaultCodexHome();
     this.sessionsRoot = options.sessionsRoot || path.join(this.codexHome, "sessions");
+    this.costSettingsProvider = typeof options.costSettingsProvider === "function" ? options.costSettingsProvider : null;
     this.cache = new Map();
   }
 
@@ -238,6 +240,19 @@ class UsageReader {
 
   getSnapshot() {
     return this.reconcileFull();
+  }
+
+  setCostSettingsProvider(provider) {
+    this.costSettingsProvider = typeof provider === "function" ? provider : null;
+  }
+
+  getCostSettings() {
+    if (!this.costSettingsProvider) return null;
+    try {
+      return this.costSettingsProvider();
+    } catch {
+      return null;
+    }
   }
 
   reconcileFull(options = {}) {
@@ -310,7 +325,8 @@ class UsageReader {
       sessions,
       scannedFileCount: files.length,
       elapsedMs: Date.now() - startedAt,
-      sync: finalSync
+      sync: finalSync,
+      costSettings: this.getCostSettings()
     });
     emitProgress(onProgress, finalSync);
     return snapshot;
@@ -393,7 +409,8 @@ class UsageReader {
       sessions,
       scannedFileCount: files.length,
       elapsedMs: Date.now() - startedAt,
-      sync: finalSync
+      sync: finalSync,
+      costSettings: this.getCostSettings()
     });
     emitProgress(onProgress, finalSync);
     return snapshot;
@@ -597,7 +614,102 @@ function sumEventsSince(session, startTime) {
   }, 0);
 }
 
-function buildSnapshot({ codexHome, sessionsRoot, sessions, scannedFileCount, elapsedMs, sync = null }) {
+function dateStartMs(date) {
+  const parsed = new Date(`${date}T00:00:00`);
+  return Number.isFinite(parsed.getTime()) ? parsed.getTime() : 0;
+}
+
+function dateEndExclusiveMs(date) {
+  const start = dateStartMs(date);
+  return start ? start + DAY_MS : 0;
+}
+
+function roundMoney(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function unavailableCostEstimate(reason, settings, cycleTotalTokens = 0) {
+  return {
+    available: false,
+    reason,
+    currency: settings?.activePackage?.currency || settings?.costPackage?.currency || "CNY",
+    packageName: settings?.activePackage?.name || settings?.costPackage?.name || "",
+    packageAmount: settings?.activePackage?.amount ?? settings?.costPackage?.amountCny ?? null,
+    cycle: settings?.costCycle || null,
+    cycleTotalTokens,
+    totalAllocatedCost: null,
+    projects: []
+  };
+}
+
+function buildCostEstimate(sessions, rawCostSettings) {
+  if (!rawCostSettings) {
+    return unavailableCostEstimate("no-active-package", null);
+  }
+
+  let settings;
+  try {
+    settings = normalizeCostSettings(rawCostSettings);
+  } catch {
+    return unavailableCostEstimate("invalid-cost-settings", null);
+  }
+
+  const activePackage = settings.activePackage || settings.costPackage;
+  if (!activePackage) {
+    return unavailableCostEstimate("no-active-package", settings);
+  }
+
+  const cycle = settings.costCycle;
+  const startMs = dateStartMs(cycle.effectiveStartDate || cycle.startDate);
+  const endMs = dateEndExclusiveMs(cycle.effectiveEndDate || cycle.endDate);
+  if (!startMs || !endMs || endMs <= startMs) {
+    return unavailableCostEstimate("invalid-cost-cycle", settings);
+  }
+
+  const projectMap = new Map();
+  let cycleTotalTokens = 0;
+  for (const session of sessions) {
+    const project = session.project || "Projectless";
+    const cycleTokens = (session.tokenEvents || []).reduce((sum, event) => {
+      const timestamp = event.timestamp || 0;
+      if (timestamp >= startMs && timestamp < endMs) {
+        return sum + (event.lastTokens || 0);
+      }
+      return sum;
+    }, 0);
+    if (cycleTokens <= 0) continue;
+    cycleTotalTokens += cycleTokens;
+    addToMap(projectMap, project, cycleTokens);
+  }
+
+  if (cycleTotalTokens <= 0) {
+    return unavailableCostEstimate("zero-cycle-tokens", settings, 0);
+  }
+
+  const packageAmount = Number(activePackage.amount ?? activePackage.amountCny) || 0;
+  const projects = Array.from(projectMap.entries())
+    .map(([project, tokens]) => ({
+      project,
+      tokens,
+      share: tokens / cycleTotalTokens,
+      allocatedCost: roundMoney(packageAmount * tokens / cycleTotalTokens)
+    }))
+    .sort((a, b) => b.tokens - a.tokens);
+
+  return {
+    available: true,
+    reason: "",
+    currency: activePackage.currency || "CNY",
+    packageName: activePackage.name,
+    packageAmount,
+    cycle,
+    cycleTotalTokens,
+    totalAllocatedCost: packageAmount,
+    projects
+  };
+}
+
+function buildSnapshot({ codexHome, sessionsRoot, sessions, scannedFileCount, elapsedMs, sync = null, costSettings = null }) {
   const now = Date.now();
   const todayStart = startOfLocalDay(now);
   const weekStart = now - 7 * DAY_MS;
@@ -695,6 +807,7 @@ function buildSnapshot({ codexHome, sessionsRoot, sessions, scannedFileCount, el
       message: "Snapshot ready.",
       errorCount: temporaryErrors.length
     },
+    costEstimate: buildCostEstimate(sessions, costSettings),
     temporaryErrors
   };
 }

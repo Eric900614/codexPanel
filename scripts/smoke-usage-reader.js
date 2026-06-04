@@ -101,6 +101,48 @@ function createFixture() {
   return { root, sessionsRoot };
 }
 
+function createCostFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-panel-cost-usage-"));
+  const sessionsRoot = path.join(root, "sessions");
+
+  writeJsonl(path.join(sessionsRoot, "2026", "06", "rollout-a-b-c-project-alpha.jsonl"), [
+    {
+      timestamp: "2026-06-05T09:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        id: "project-alpha",
+        source: "electron",
+        cwd: "F:\\_CODE\\alpha",
+        timestamp: "2026-06-05T09:00:00.000Z"
+      }
+    },
+    tokenCountEvent("2026-06-05T09:30:00.000Z", 1000, 1000),
+    tokenCountEvent("2026-07-02T09:30:00.000Z", 5000, 4000)
+  ]);
+
+  writeJsonl(path.join(sessionsRoot, "2026", "06", "rollout-a-b-c-project-beta.jsonl"), [
+    {
+      timestamp: "2026-06-10T09:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        id: "project-beta",
+        source: "cli",
+        cwd: "F:\\_CODE\\beta",
+        timestamp: "2026-06-10T09:00:00.000Z"
+      }
+    },
+    tokenCountEvent("2026-06-10T09:30:00.000Z", 3000, 3000)
+  ]);
+
+  return { root, sessionsRoot };
+}
+
+function localDateForCurrentMonth(day) {
+  const now = new Date();
+  const date = new Date(now.getFullYear(), now.getMonth(), day, 12, 0, 0, 0);
+  return date.toISOString();
+}
+
 const fixture = createFixture();
 
 const costFixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-panel-cost-"));
@@ -196,6 +238,106 @@ const clearedCostSettings = costStore.saveSettings({ packages: [], activePackage
 assert.equal(clearedCostSettings.configured, false);
 assert.equal(clearedCostSettings.costPackage, null);
 assert.equal(clearedCostSettings.activePackage, null);
+
+const costUsageFixture = createCostFixture();
+const customCostSettings = {
+  packages: [{ id: "package-20x", name: "20x", amount: 1280, currency: "CNY" }],
+  activePackageId: "package-20x",
+  costCycle: {
+    mode: "custom",
+    startDate: "2026-06-01",
+    endDate: "2026-06-30"
+  }
+};
+const costSnapshot = new UsageReader({
+  codexHome: costUsageFixture.root,
+  sessionsRoot: costUsageFixture.sessionsRoot,
+  costSettingsProvider: () => customCostSettings
+}).reconcileFull();
+assert.equal(costSnapshot.costEstimate.available, true);
+assert.equal(costSnapshot.costEstimate.packageAmount, 1280);
+assert.equal(costSnapshot.costEstimate.cycleTotalTokens, 4000);
+assert.equal(costSnapshot.costEstimate.projects.length, 2);
+assert.equal(costSnapshot.costEstimate.projects[0].project, "beta");
+assert.equal(costSnapshot.costEstimate.projects[0].tokens, 3000);
+assert.equal(costSnapshot.costEstimate.projects[0].allocatedCost, 960);
+assert.equal(costSnapshot.costEstimate.projects[1].project, "alpha");
+assert.equal(costSnapshot.costEstimate.projects[1].tokens, 1000);
+assert.equal(costSnapshot.costEstimate.projects[1].allocatedCost, 320);
+
+const lowerPackageSnapshot = new UsageReader({
+  codexHome: costUsageFixture.root,
+  sessionsRoot: costUsageFixture.sessionsRoot,
+  costSettingsProvider: () => ({
+    ...customCostSettings,
+    packages: [{ id: "package-10x", name: "10x", amount: 640, currency: "CNY" }],
+    activePackageId: "package-10x"
+  })
+}).reconcileFull();
+assert.equal(lowerPackageSnapshot.costEstimate.totalAllocatedCost, 640);
+assert.equal(lowerPackageSnapshot.costEstimate.projects[0].allocatedCost, 480);
+assert.equal(lowerPackageSnapshot.costEstimate.projects[1].allocatedCost, 160);
+
+const naturalMonthFixture = (() => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-panel-natural-cost-"));
+  const sessionsRoot = path.join(root, "sessions");
+  writeJsonl(path.join(sessionsRoot, "current", "rollout-a-b-c-natural-alpha.jsonl"), [
+    {
+      timestamp: localDateForCurrentMonth(2),
+      type: "session_meta",
+      payload: {
+        id: "natural-alpha",
+        source: "electron",
+        cwd: "F:\\_CODE\\natural-alpha",
+        timestamp: localDateForCurrentMonth(2)
+      }
+    },
+    tokenCountEvent(localDateForCurrentMonth(2), 2000, 2000)
+  ]);
+  return { root, sessionsRoot };
+})();
+
+const naturalMonthSnapshot = new UsageReader({
+  codexHome: naturalMonthFixture.root,
+  sessionsRoot: naturalMonthFixture.sessionsRoot,
+  costSettingsProvider: () => ({
+    packages: [{ id: "package-natural", name: "Natural", amount: 100, currency: "CNY" }],
+    activePackageId: "package-natural",
+    costCycle: { mode: "naturalMonth" }
+  })
+}).reconcileFull();
+assert.equal(naturalMonthSnapshot.costEstimate.available, true);
+assert.equal(naturalMonthSnapshot.costEstimate.cycle.mode, "naturalMonth");
+assert.equal(naturalMonthSnapshot.costEstimate.cycleTotalTokens, 2000);
+assert.equal(naturalMonthSnapshot.costEstimate.projects[0].allocatedCost, 100);
+
+const noPackageSnapshot = new UsageReader({
+  codexHome: costUsageFixture.root,
+  sessionsRoot: costUsageFixture.sessionsRoot,
+  costSettingsProvider: () => ({
+    packages: [],
+    activePackageId: "",
+    costCycle: customCostSettings.costCycle
+  })
+}).reconcileFull();
+assert.equal(noPackageSnapshot.costEstimate.available, false);
+assert.equal(noPackageSnapshot.costEstimate.reason, "no-active-package");
+
+const zeroTokenSnapshot = new UsageReader({
+  codexHome: costUsageFixture.root,
+  sessionsRoot: costUsageFixture.sessionsRoot,
+  costSettingsProvider: () => ({
+    ...customCostSettings,
+    costCycle: {
+      mode: "custom",
+      startDate: "2026-08-01",
+      endDate: "2026-08-31"
+    }
+  })
+}).reconcileFull();
+assert.equal(zeroTokenSnapshot.costEstimate.available, false);
+assert.equal(zeroTokenSnapshot.costEstimate.reason, "zero-cycle-tokens");
+assert.equal(zeroTokenSnapshot.costEstimate.cycleTotalTokens, 0);
 
 const reader = new UsageReader({ codexHome: fixture.root, sessionsRoot: fixture.sessionsRoot });
 const progressEvents = [];
