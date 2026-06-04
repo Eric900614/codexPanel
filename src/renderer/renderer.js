@@ -32,6 +32,8 @@ let manualRefreshRunning = false;
 let unsubscribeSnapshot = null;
 let unsubscribeSyncProgress = null;
 let unsubscribeCostSettings = null;
+let costSettingsSaveSequence = 0;
+const staleCostSettingsResponses = new WeakSet();
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -80,6 +82,15 @@ function buildUnconfiguredCostSettings() {
 
 function isCostPackageConfigured(settings) {
   return Boolean(settings?.configured && (settings.activePackage || settings.costPackage));
+}
+
+function costSettingsUpdatedAtMs(settings) {
+  const time = Date.parse(settings?.updatedAt || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
+function shouldApplyLoadedCostSettings(settings) {
+  return costSettingsUpdatedAtMs(settings) >= costSettingsUpdatedAtMs(latestCostSettings);
 }
 
 function formatCurrency(value, currency = "CNY") {
@@ -552,7 +563,10 @@ function renderPushedSnapshot(snapshot) {
 }
 
 function renderCostSettings(settings) {
-  latestCostSettings = settings || buildUnconfiguredCostSettings();
+  const nextCostSettings = settings || buildUnconfiguredCostSettings();
+  if (settings && staleCostSettingsResponses.has(settings)) return false;
+  if (!shouldApplyLoadedCostSettings(nextCostSettings)) return false;
+  latestCostSettings = nextCostSettings;
   if (latestSnapshot) {
     renderSnapshot(latestSnapshot);
   }
@@ -560,6 +574,7 @@ function renderCostSettings(settings) {
     renderCostPackageList();
     fillCostCycleForm(latestCostSettings.costCycle);
   }
+  return true;
 }
 
 async function loadCostSettings() {
@@ -580,7 +595,9 @@ async function hydrateSnapshot() {
         : buildMockSnapshot()
     ]);
     if (manualRefreshRunning) return;
-    latestCostSettings = costSettings || buildUnconfiguredCostSettings();
+    if (shouldApplyLoadedCostSettings(costSettings)) {
+      latestCostSettings = costSettings || buildUnconfiguredCostSettings();
+    }
     renderPushedSnapshot(snapshot);
     renderSyncProgress(snapshot.sync);
   } catch (error) {
@@ -656,19 +673,26 @@ function closeCostSettings() {
 }
 
 async function saveCostSettings(settings) {
+  const sequence = ++costSettingsSaveSequence;
+  let saved;
   if (hasBridge && typeof window.codexPanel.saveCostSettings === "function") {
-    return window.codexPanel.saveCostSettings(settings);
+    saved = await window.codexPanel.saveCostSettings(settings);
+  } else {
+    saved = {
+      version: 1,
+      configured: Boolean(settings.activePackageId),
+      packages: settings.packages || [],
+      activePackageId: settings.activePackageId || "",
+      activePackage: (settings.packages || []).find((costPackage) => costPackage.id === settings.activePackageId) || null,
+      costCycle: settings.costCycle || latestCostSettings.costCycle,
+      costPackage: null,
+      updatedAt: new Date().toISOString()
+    };
   }
-  return {
-    version: 1,
-    configured: Boolean(settings.activePackageId),
-    packages: settings.packages || [],
-    activePackageId: settings.activePackageId || "",
-    activePackage: (settings.packages || []).find((costPackage) => costPackage.id === settings.activePackageId) || null,
-    costCycle: settings.costCycle || latestCostSettings.costCycle,
-    costPackage: null,
-    updatedAt: new Date().toISOString()
-  };
+  if (sequence !== costSettingsSaveSequence && saved && typeof saved === "object") {
+    staleCostSettingsResponses.add(saved);
+  }
+  return saved;
 }
 
 function currentCostPackages() {
@@ -806,8 +830,9 @@ async function handleCostSettingsSubmit(event) {
       activePackageId: nextActivePackageId,
       costCycle
     });
-    renderCostSettings(saved);
-    fillCostPackageForm(nextPackage);
+    if (renderCostSettings(saved)) {
+      fillCostPackageForm(nextPackage);
+    }
   } catch (error) {
     costSettingsMessageNode.textContent = error.message || "保存失败";
   }
@@ -820,8 +845,9 @@ async function clearCostSettings() {
       activePackageId: "",
       costCycle: readCostCycleFromForm()
     });
-    renderCostSettings(saved);
-    fillCostPackageForm(null);
+    if (renderCostSettings(saved)) {
+      fillCostPackageForm(null);
+    }
   } catch (error) {
     costSettingsMessageNode.textContent = error.message || "清除失败";
   }
@@ -851,8 +877,9 @@ async function removeCostPackage(packageId) {
       activePackageId: nextActivePackageId,
       costCycle: latestCostSettings.costCycle
     });
-    renderCostSettings(saved);
-    fillCostPackageForm(null);
+    if (renderCostSettings(saved)) {
+      fillCostPackageForm(null);
+    }
   } catch (error) {
     costSettingsMessageNode.textContent = error.message || "删除失败";
   }
@@ -866,8 +893,9 @@ async function saveCostCycleFromForm() {
       activePackageId: activeCostPackageId(),
       costCycle
     });
-    renderCostSettings(saved);
-    costSettingsMessageNode.textContent = "";
+    if (renderCostSettings(saved)) {
+      costSettingsMessageNode.textContent = "";
+    }
   } catch (error) {
     costSettingsMessageNode.textContent = error.message || "周期保存失败";
     fillCostCycleForm(latestCostSettings.costCycle);
@@ -891,8 +919,10 @@ newCostPackageButton.addEventListener("click", () => fillCostPackageForm(null));
 costSettingsForm.addEventListener("submit", handleCostSettingsSubmit);
 costCycleModeCustomInput.addEventListener("change", saveCostCycleFromForm);
 costCycleModeNaturalMonthInput.addEventListener("change", saveCostCycleFromForm);
-costCycleStartDateInput.addEventListener("change", previewCostCycleFromForm);
-costCycleEndDateInput.addEventListener("change", previewCostCycleFromForm);
+costCycleStartDateInput.addEventListener("input", previewCostCycleFromForm);
+costCycleEndDateInput.addEventListener("input", previewCostCycleFromForm);
+costCycleStartDateInput.addEventListener("change", saveCostCycleFromForm);
+costCycleEndDateInput.addEventListener("change", saveCostCycleFromForm);
 costPackageListNode.addEventListener("change", (event) => {
   if (event.target.matches("input[name='activeCostPackage']")) {
     setActiveCostPackage(event.target.value);
