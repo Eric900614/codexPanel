@@ -413,7 +413,8 @@ function renderCostEstimate(costEstimate) {
           <span>分摊成本</span>
         </div>
         ${projects.map((project) => {
-          const sharePercent = clamp(project.share * 100, 0, 100);
+          const rawSharePercent = Number(project.share) * 100;
+          const sharePercent = Number.isFinite(rawSharePercent) ? clamp(rawSharePercent, 0, 100) : 0;
           return `
           <div class="cost-project-row" title="${escapeHtml(project.project)}">
             <span class="cost-project-main">

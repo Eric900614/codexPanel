@@ -276,16 +276,15 @@ app.whenReady().then(async () => {
   assert.equal(packageUiState.overlayVisible, true, "cost settings should remain visible for final screenshot");
 
   await new Promise((resolve) => setTimeout(resolve, 900));
-  const degradedProgress = {
+  window.webContents.send("usage:syncProgress", {
     state: "idle",
     phase: "idle",
     processedFileCount: uiState.progressCount ? Number(uiState.progressCount.split(" / ")[0]) || 0 : 0,
     totalFileCount: null,
     message: "Temporary read errors.",
     errorCount: 2
-  };
-  await window.webContents.executeJavaScript(`renderSyncProgress(${JSON.stringify(degradedProgress)})`);
-  await new Promise((resolve) => setTimeout(resolve, 60));
+  });
+  await new Promise((resolve) => setTimeout(resolve, 120));
 
   const degradedState = await window.webContents.executeJavaScript(`(() => {
     const progressText = document.getElementById("syncProgressMessage")?.textContent?.trim() || "";
