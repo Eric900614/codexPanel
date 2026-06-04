@@ -1,14 +1,23 @@
 const path = require("node:path");
 const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { CostSettingsStore } = require("./cost-settings-store");
 const { UsageReader, getDefaultCodexHome } = require("./usage-reader");
 const { UsageSynchronization } = require("./usage-synchronization");
 
 const reader = new UsageReader();
+let costSettingsStore = null;
 const synchronization = new UsageSynchronization({
   reader,
   publishSnapshot,
   publishProgress: publishSyncProgress
 });
+
+function getCostSettingsStore() {
+  if (!costSettingsStore) {
+    costSettingsStore = new CostSettingsStore({ configDir: app.getPath("userData") });
+  }
+  return costSettingsStore;
+}
 
 function publishSnapshot(snapshot) {
   BrowserWindow.getAllWindows().forEach((window) => {
@@ -22,6 +31,14 @@ function publishSyncProgress(progress) {
   BrowserWindow.getAllWindows().forEach((window) => {
     if (!window.isDestroyed()) {
       window.webContents.send("usage:syncProgress", progress);
+    }
+  });
+}
+
+function publishCostSettings(settings) {
+  BrowserWindow.getAllWindows().forEach((window) => {
+    if (!window.isDestroyed()) {
+      window.webContents.send("cost:settings", settings);
     }
   });
 }
@@ -57,6 +74,14 @@ ipcMain.handle("usage:getConfig", () => ({
   codexHome: getDefaultCodexHome(),
   platform: process.platform
 }));
+
+ipcMain.handle("cost:getSettings", () => getCostSettingsStore().getSettings());
+
+ipcMain.handle("cost:saveSettings", (_event, settings) => {
+  const saved = getCostSettingsStore().saveSettings(settings);
+  publishCostSettings(saved);
+  return saved;
+});
 
 ipcMain.handle("usage:openCodexHome", async () => {
   const result = await shell.openPath(reader.codexHome);

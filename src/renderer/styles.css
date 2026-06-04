@@ -14,9 +14,9 @@
   --rose: #ed82a4;
   --mint: #91d4bd;
   --shadow: rgba(5, 4, 18, 0.34);
-  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
-  --font-title: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
-  --font-number: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-ui: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --font-title: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --font-number: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "Cascadia Mono", "Consolas", "Microsoft YaHei UI", monospace;
 }
 
@@ -42,6 +42,7 @@ body {
   font-feature-settings: "tnum" 1;
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
+  letter-spacing: 0;
 }
 
 button,
@@ -150,6 +151,11 @@ h1 {
 .ghost-button:disabled {
   cursor: wait;
   opacity: 0.62;
+}
+
+.primary-button {
+  border-color: rgba(123, 221, 228, 0.38);
+  background: rgba(123, 221, 228, 0.13);
 }
 
 .sync-progress {
@@ -364,8 +370,12 @@ h1 {
 
 .metric {
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 14px;
   min-height: 0;
-  padding: 11px 16px;
+  padding: 13px 16px;
   overflow: hidden;
 }
 
@@ -390,18 +400,26 @@ h1 {
 }
 
 .metric-title {
+  grid-column: 1;
+  grid-row: 1;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 620;
+  font-weight: 600;
 }
 
 .metric-value {
-  margin-top: 7px;
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
+  min-width: 120px;
+  margin-top: 0;
+  padding-right: 22px;
   color: var(--cyan);
   font-family: var(--font-number);
-  font-size: 30px;
-  font-weight: 720;
+  font-size: 31px;
+  font-weight: 700;
   line-height: 1;
+  text-align: right;
 }
 
 .metric-value.light {
@@ -409,10 +427,12 @@ h1 {
 }
 
 .metric-sub {
-  margin-top: 4px;
+  grid-column: 1;
+  grid-row: 2;
+  margin-top: 5px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 560;
+  font-weight: 540;
 }
 
 .board-panel {
@@ -432,6 +452,11 @@ h1 {
   font-family: var(--font-title);
   font-size: 18px;
   font-weight: 700;
+}
+
+.board-panel .section-header h2 {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .section-kicker {
@@ -503,6 +528,13 @@ h1 {
 
 .single-grid .token-raw {
   display: none;
+}
+
+.cost-kicker {
+  color: var(--amber);
+  max-width: 158px;
+  line-height: 1.28;
+  text-align: right;
 }
 
 .split-grid {
@@ -758,6 +790,81 @@ h1 {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 18px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(5, 4, 18, 0.62);
+}
+
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.settings-modal {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #1d1a31;
+  box-shadow: 0 22px 46px rgba(5, 4, 18, 0.46);
+}
+
+.modal-header,
+.modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.icon-button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 21px;
+  line-height: 1;
+}
+
+.field-row {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.field-row input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text);
+  padding: 0 10px;
+  outline: none;
+}
+
+.field-row input:focus {
+  border-color: rgba(123, 221, 228, 0.55);
+}
+
+.form-message {
+  min-height: 18px;
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 560;
 }
 
 @keyframes shimmer {

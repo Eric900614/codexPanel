@@ -16,6 +16,7 @@
         <div class="top-actions">
           <span id="liveStatus" class="status-pill">读取中</span>
           <button id="refreshButton" class="ghost-button" type="button">刷新</button>
+          <button id="costSettingsButton" class="ghost-button" type="button">成本设置</button>
           <button id="openFolderButton" class="ghost-button" type="button">打开目录</button>
         </div>
       </section>
@@ -39,6 +40,28 @@
         </div>
       </section>
     </main>
+
+    <section id="costSettingsOverlay" class="modal-backdrop" hidden>
+      <form id="costSettingsForm" class="settings-modal">
+        <div class="modal-header">
+          <h2>成本设置</h2>
+          <button id="closeCostSettingsButton" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <label class="field-row">
+          <span>套餐名称</span>
+          <input id="costPackageName" type="text" autocomplete="off" placeholder="5x">
+        </label>
+        <label class="field-row">
+          <span>套餐金额</span>
+          <input id="costPackageAmount" type="number" min="0" step="1" inputmode="decimal" placeholder="780">
+        </label>
+        <p id="costSettingsMessage" class="form-message"></p>
+        <div class="modal-actions">
+          <button id="clearCostSettingsButton" class="ghost-button" type="button">清除套餐</button>
+          <button class="ghost-button primary-button" type="submit">保存</button>
+        </div>
+      </form>
+    </section>
 
     <script src="./renderer.js"></script>
   </body>
