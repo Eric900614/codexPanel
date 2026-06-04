@@ -304,6 +304,174 @@ assert.equal(pushedSnapshots[1].marker, "snapshot-2");
 synchronization.syncIncremental();
 assert.equal(pushedSnapshots.length, 3);
 assert.equal(pushedSnapshots[2].marker, "incremental-3");
+synchronization.stop();
+
+function createTimerHarness() {
+  let nextId = 1;
+  const timeouts = new Map();
+  const intervals = new Map();
+  const clearedTimeouts = [];
+  const clearedIntervals = [];
+
+  return {
+    setTimeout(callback, delayMs) {
+      const id = nextId++;
+      timeouts.set(id, { callback, delayMs });
+      return id;
+    },
+    clearTimeout(id) {
+      clearedTimeouts.push(id);
+      timeouts.delete(id);
+    },
+    setInterval(callback, delayMs) {
+      const id = nextId++;
+      intervals.set(id, { callback, delayMs });
+      return id;
+    },
+    clearInterval(id) {
+      clearedIntervals.push(id);
+      intervals.delete(id);
+    },
+    runTimeouts() {
+      const pending = Array.from(timeouts.entries());
+      timeouts.clear();
+      pending.forEach(([, timer]) => timer.callback());
+    },
+    runIntervals() {
+      Array.from(intervals.values()).forEach((timer) => timer.callback());
+    },
+    timeouts,
+    intervals,
+    clearedTimeouts,
+    clearedIntervals
+  };
+}
+
+const watchTimerHarness = createTimerHarness();
+const watcherEvents = [];
+const watcherCloses = [];
+const watcherCallOrder = [];
+const watcherReader = {
+  sessionsRoot: path.join(os.tmpdir(), "codex-panel-watch-sessions"),
+  reconcileFull({ onProgress } = {}) {
+    watcherCallOrder.push("full");
+    onProgress?.({
+      state: "idle",
+      phase: "idle",
+      processedFileCount: 1,
+      totalFileCount: 1,
+      message: "Full done.",
+      errorCount: 0
+    });
+    return {
+      exists: true,
+      scannedFileCount: watcherCallOrder.length,
+      sync: { state: "idle", phase: "idle", processedFileCount: 1, totalFileCount: 1, message: "Full done.", errorCount: 0 },
+      marker: `full-${watcherCallOrder.length}`
+    };
+  },
+  reconcileIncremental({ onProgress } = {}) {
+    watcherCallOrder.push("incremental");
+    onProgress?.({
+      state: "idle",
+      phase: "idle",
+      processedFileCount: 1,
+      totalFileCount: 1,
+      message: "Incremental done.",
+      errorCount: 0
+    });
+    return {
+      exists: true,
+      scannedFileCount: watcherCallOrder.length,
+      sync: { state: "idle", phase: "idle", processedFileCount: 1, totalFileCount: 1, message: "Incremental done.", errorCount: 0 },
+      marker: `incremental-${watcherCallOrder.length}`
+    };
+  }
+};
+const watcherSync = new UsageSynchronization({
+  reader: watcherReader,
+  publishSnapshot: (snapshot) => watcherEvents.push(snapshot.marker),
+  publishProgress: () => {},
+  debounceMs: 25,
+  reconcileIntervalMs: 60000,
+  watchFactory: (root, onChange) => {
+    assert.equal(root, watcherReader.sessionsRoot);
+    watcherEvents.push("watch-started");
+    watcherEvents.push(onChange);
+    return {
+      close() {
+        watcherCloses.push("closed");
+      }
+    };
+  },
+  setTimeout: watchTimerHarness.setTimeout,
+  clearTimeout: watchTimerHarness.clearTimeout,
+  setInterval: watchTimerHarness.setInterval,
+  clearInterval: watchTimerHarness.clearInterval
+});
+
+watcherSync.start();
+assert.deepEqual(watcherCallOrder, ["full"]);
+assert.equal(watchTimerHarness.intervals.size, 1);
+assert.equal(Array.from(watchTimerHarness.intervals.values())[0].delayMs, 60000);
+
+const emitWatcherChange = watcherEvents.find((event) => typeof event === "function");
+emitWatcherChange({ eventType: "change", filename: "2026\\06\\rollout-a-b-c-alpha.jsonl" });
+emitWatcherChange({ eventType: "change", filename: "2026\\06\\rollout-a-b-c-alpha.jsonl" });
+assert.equal(watchTimerHarness.timeouts.size, 1);
+assert.equal(Array.from(watchTimerHarness.timeouts.values())[0].delayMs, 25);
+watchTimerHarness.runTimeouts();
+assert.deepEqual(watcherCallOrder, ["full", "incremental"]);
+assert.equal(watcherEvents.at(-1), "incremental-2");
+
+emitWatcherChange({ eventType: "change", filename: "2026\\06\\rollout-a-b-c-beta.jsonl" });
+watcherSync.refreshFull();
+assert.deepEqual(watcherCallOrder, ["full", "incremental", "full"]);
+watchTimerHarness.runTimeouts();
+assert.deepEqual(watcherCallOrder, ["full", "incremental", "full"]);
+
+watchTimerHarness.runIntervals();
+assert.deepEqual(watcherCallOrder, ["full", "incremental", "full", "incremental"]);
+
+watcherSync.stop();
+assert.equal(watcherCloses.length, 1);
+assert.equal(watchTimerHarness.intervals.size, 0);
+assert(watchTimerHarness.clearedIntervals.length > 0);
+
+const backstopFixture = createFixture();
+const backstopReader = new UsageReader({
+  codexHome: backstopFixture.root,
+  sessionsRoot: backstopFixture.sessionsRoot
+});
+const backstopTimerHarness = createTimerHarness();
+const backstopSnapshots = [];
+const backstopSync = new UsageSynchronization({
+  reader: backstopReader,
+  publishSnapshot: (snapshot) => backstopSnapshots.push(snapshot),
+  publishProgress: () => {},
+  watchFactory: () => ({ close() {} }),
+  setTimeout: backstopTimerHarness.setTimeout,
+  clearTimeout: backstopTimerHarness.clearTimeout,
+  setInterval: backstopTimerHarness.setInterval,
+  clearInterval: backstopTimerHarness.clearInterval
+});
+const backstopAlphaPath = path.join(
+  backstopFixture.sessionsRoot,
+  "2026",
+  "06",
+  "rollout-a-b-c-alpha.jsonl"
+);
+
+backstopSync.start();
+assert.equal(backstopSnapshots.at(-1).totals.totalTokens, 2400);
+fs.appendFileSync(
+  backstopAlphaPath,
+  `\n${JSON.stringify(tokenCountEvent(new Date().toISOString(), 1800, 600))}`,
+  "utf8"
+);
+backstopTimerHarness.runIntervals();
+assert.equal(backstopSnapshots.at(-1).totals.totalTokens, 3000);
+backstopSync.stop();
 
 const incrementalFixture = createFixture();
 const incrementalReader = new UsageReader({
