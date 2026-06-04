@@ -20,6 +20,16 @@
         </div>
       </section>
 
+      <section id="syncProgress" class="sync-progress" aria-live="polite" hidden>
+        <div class="sync-progress-head">
+          <span id="syncProgressMessage">同步中</span>
+          <span id="syncProgressCount"></span>
+        </div>
+        <div class="sync-progress-track">
+          <div id="syncProgressBar" class="sync-progress-bar"></div>
+        </div>
+      </section>
+
       <section id="app" class="dashboard" aria-live="polite">
         <div class="skeleton hero-skeleton"></div>
         <div class="skeleton-grid">

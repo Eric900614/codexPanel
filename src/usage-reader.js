@@ -91,16 +91,71 @@ class UsageReader {
   }
 
   getSnapshot() {
+    return this.reconcileFull();
+  }
+
+  reconcileFull(options = {}) {
     const startedAt = Date.now();
+    const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+
+    emitProgress(onProgress, {
+      state: "scanning",
+      phase: "scanning",
+      processedFileCount: 0,
+      totalFileCount: null,
+      message: "Scanning Codex session files.",
+      errorCount: 0
+    });
+
     const files = walkJsonlFiles(this.sessionsRoot);
-    const sessions = files.map((filePath) => this.parseSession(filePath)).filter(Boolean);
+    emitProgress(onProgress, {
+      state: "scanning",
+      phase: "scanning",
+      processedFileCount: files.length,
+      totalFileCount: files.length,
+      message: `Found ${files.length} session files.`,
+      errorCount: 0
+    });
+
+    const sessions = [];
+    let errorCount = 0;
+    files.forEach((filePath, index) => {
+      const session = this.parseSession(filePath);
+      if (session) {
+        sessions.push(session);
+        if (session.error) errorCount += 1;
+      }
+
+      emitProgress(onProgress, {
+        state: "reconciling",
+        phase: "reconciling",
+        processedFileCount: index + 1,
+        totalFileCount: files.length,
+        message: `Parsed ${index + 1} of ${files.length} session files.`,
+        errorCount
+      });
+    });
+
+    const finalSync = {
+      state: "idle",
+      phase: "idle",
+      processedFileCount: files.length,
+      totalFileCount: files.length,
+      message: errorCount > 0
+        ? `Refresh finished with ${errorCount} temporary read error${errorCount === 1 ? "" : "s"}.`
+        : "Refresh complete.",
+      errorCount
+    };
+
     const snapshot = buildSnapshot({
       codexHome: this.codexHome,
       sessionsRoot: this.sessionsRoot,
       sessions,
       scannedFileCount: files.length,
-      elapsedMs: Date.now() - startedAt
+      elapsedMs: Date.now() - startedAt,
+      sync: finalSync
     });
+    emitProgress(onProgress, finalSync);
     return snapshot;
   }
 
@@ -233,6 +288,10 @@ class UsageReader {
   }
 }
 
+function emitProgress(onProgress, progress) {
+  if (onProgress) onProgress(progress);
+}
+
 function latestRateLimit(sessions) {
   return sessions
     .filter((session) => session.latestRateLimits)
@@ -261,7 +320,7 @@ function sumEventsSince(session, startTime) {
   }, 0);
 }
 
-function buildSnapshot({ codexHome, sessionsRoot, sessions, scannedFileCount, elapsedMs }) {
+function buildSnapshot({ codexHome, sessionsRoot, sessions, scannedFileCount, elapsedMs, sync = null }) {
   const now = Date.now();
   const todayStart = startOfLocalDay(now);
   const weekStart = now - 7 * DAY_MS;
@@ -307,6 +366,12 @@ function buildSnapshot({ codexHome, sessionsRoot, sessions, scannedFileCount, el
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
   const rateLimits = latestRateLimit(activeSessions);
+  const temporaryErrors = sessions
+    .filter((session) => session.error)
+    .map((session) => ({
+      fileName: session.fileName,
+      message: session.error
+    }));
 
   return {
     generatedAt: now,
@@ -344,7 +409,16 @@ function buildSnapshot({ codexHome, sessionsRoot, sessions, scannedFileCount, el
       lastTokens: session.lastTokens,
       updatedAt: session.updatedAt,
       contextWindow: session.contextWindow
-    }))
+    })),
+    sync: sync || {
+      state: "idle",
+      phase: "idle",
+      processedFileCount: scannedFileCount,
+      totalFileCount: scannedFileCount,
+      message: "Snapshot ready.",
+      errorCount: temporaryErrors.length
+    },
+    temporaryErrors
   };
 }
 

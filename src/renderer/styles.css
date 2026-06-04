@@ -13,7 +13,11 @@
   --amber: #f0cf64;
   --rose: #ed82a4;
   --mint: #91d4bd;
-  --shadow: rgba(4, 2, 16, 0.42);
+  --shadow: rgba(5, 4, 18, 0.34);
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --font-title: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-number: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", "Microsoft YaHei UI", monospace;
 }
 
 * {
@@ -34,7 +38,10 @@ body {
     radial-gradient(circle at 12% 26%, rgba(169, 148, 241, 0.11), transparent 28rem),
     linear-gradient(180deg, #171428 0%, #11101e 100%);
   color: var(--text);
-  font-family: "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-ui);
+  font-feature-settings: "tnum" 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 button,
@@ -48,7 +55,7 @@ input {
   min-height: 900px;
   margin: 0 auto;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   padding: 16px 0;
 }
 
@@ -63,9 +70,9 @@ input {
 .eyebrow {
   margin: 0 0 6px;
   color: var(--cyan);
-  font-family: "Cascadia Mono", "Consolas", monospace;
-  font-size: 12px;
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 650;
 }
 
 h1,
@@ -76,7 +83,9 @@ p {
 }
 
 h1 {
+  font-family: var(--font-title);
   font-size: 26px;
+  font-weight: 720;
   line-height: 1.1;
 }
 
@@ -102,8 +111,9 @@ h1 {
   align-items: center;
   padding: 0 12px;
   color: var(--muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-ui);
   font-size: 12px;
+  font-weight: 520;
 }
 
 .status-pill::before {
@@ -124,6 +134,7 @@ h1 {
 .ghost-button {
   padding: 0 14px;
   cursor: pointer;
+  font-weight: 560;
   transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
 }
 
@@ -134,6 +145,58 @@ h1 {
 
 .ghost-button:active {
   transform: translateY(1px);
+}
+
+.ghost-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.sync-progress {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.sync-progress[hidden] {
+  display: none;
+}
+
+.sync-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.sync-progress-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sync-progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--amber));
+  transition: width 220ms ease;
+}
+
+.sync-progress.is-idle .sync-progress-bar {
+  background: linear-gradient(90deg, var(--mint), var(--cyan));
+}
+
+.sync-progress.has-errors .sync-progress-bar {
+  background: linear-gradient(90deg, var(--amber), var(--rose));
 }
 
 .dashboard {
@@ -180,8 +243,8 @@ h1 {
 .panel {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: linear-gradient(180deg, rgba(37, 33, 57, 0.88), rgba(29, 26, 49, 0.9));
-  box-shadow: 0 18px 42px var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  background: linear-gradient(180deg, rgba(38, 35, 58, 0.78), rgba(27, 25, 43, 0.84));
+  box-shadow: 0 14px 34px var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.045);
 }
 
 .hero-panel {
@@ -217,15 +280,15 @@ h1 {
 .reset-label {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 620;
 }
 
 .reset-time {
   margin-top: 6px;
   color: var(--cyan);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-number);
   font-size: 25px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .reset-block.left .reset-time {
@@ -271,17 +334,17 @@ h1 {
 
 .gauge-small {
   color: var(--cyan);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-number);
   font-size: 28px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .gauge-large {
   margin-top: 10px;
   color: var(--violet);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-number);
   font-size: 64px;
-  font-weight: 900;
+  font-weight: 720;
   line-height: 0.9;
 }
 
@@ -289,7 +352,7 @@ h1 {
   margin-top: 14px;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 560;
 }
 
 .metric-grid {
@@ -329,15 +392,15 @@ h1 {
 .metric-title {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 620;
 }
 
 .metric-value {
   margin-top: 7px;
   color: var(--cyan);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-number);
   font-size: 30px;
-  font-weight: 900;
+  font-weight: 720;
   line-height: 1;
 }
 
@@ -349,7 +412,7 @@ h1 {
   margin-top: 4px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 560;
 }
 
 .board-panel {
@@ -366,14 +429,16 @@ h1 {
 }
 
 .section-header h2 {
+  font-family: var(--font-title);
   font-size: 18px;
+  font-weight: 700;
 }
 
 .section-kicker {
   color: var(--muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .token-cards {
@@ -401,15 +466,15 @@ h1 {
 .token-label {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 620;
 }
 
 .token-main {
   margin-top: 3px;
   color: var(--text);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-number);
   font-size: 19px;
-  font-weight: 900;
+  font-weight: 720;
 }
 
 .single-grid .token-main {
@@ -431,9 +496,9 @@ h1 {
 .token-raw {
   margin-top: 2px;
   color: var(--muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .single-grid .token-raw {
@@ -485,15 +550,15 @@ h1 {
 .donut-total-label {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 620;
 }
 
 .donut-total {
   margin-top: 4px;
   color: var(--text);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-number);
   font-size: 16px;
-  font-weight: 900;
+  font-weight: 720;
 }
 
 .breakdown {
@@ -522,7 +587,7 @@ h1 {
   overflow: hidden;
   color: var(--text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -530,9 +595,9 @@ h1 {
 .breakdown-tokens,
 .breakdown-percent {
   color: var(--muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-number);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .breakdown-tokens {
@@ -554,9 +619,9 @@ h1 {
   justify-content: space-between;
   gap: 12px;
   color: var(--muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-number);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .model-name {
@@ -605,7 +670,7 @@ h1 {
   overflow: hidden;
   color: var(--text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -614,7 +679,7 @@ h1 {
   margin-top: 5px;
   overflow: hidden;
   color: var(--muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -623,9 +688,9 @@ h1 {
 .session-tokens {
   align-self: center;
   color: var(--cyan);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-number);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .foot-panel {
@@ -642,14 +707,14 @@ h1 {
 .foot-label {
   color: var(--subtle);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 620;
 }
 
 .foot-value {
   margin-top: 7px;
   overflow: hidden;
   color: var(--muted);
-  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
