@@ -80,6 +80,7 @@ app.whenReady().then(async () => {
       showsNoCostPackage: appText.includes("未配置成本套餐"),
       showsTokenBoard: appText.includes("Token 消耗看板"),
       showsUnavailableCost: Boolean(document.querySelector(".cost-estimate.is-unavailable")),
+      showsCostSetupEntry: Boolean(document.querySelector(".cost-setup-entry")),
       appTextLength: appText.length,
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
@@ -97,6 +98,7 @@ app.whenReady().then(async () => {
   assert.equal(uiState.showsNoCostPackage, true, "dashboard should show the no-cost-package state");
   assert.equal(uiState.showsTokenBoard, true, "token dashboard should remain visible without a cost package");
   assert.equal(uiState.showsUnavailableCost, true, "cost estimate should be unavailable without an active package");
+  assert.equal(uiState.showsCostSetupEntry, true, "unconfigured homepage should include a cost setup entry");
   assert(uiState.scrollWidth <= uiState.viewportWidth, "dashboard should not have a horizontal scrollbar");
   assert(uiState.scrollHeight <= uiState.viewportHeight, "dashboard should not have a vertical scrollbar");
 
@@ -224,6 +226,9 @@ app.whenReady().then(async () => {
       naturalMonthVisible: appText.includes("自然月") && cycleSummaryText.includes("自然月"),
       costAllocationVisible: Boolean(document.querySelector(".cost-estimate:not(.is-unavailable)")),
       projectAllocationVisible: document.querySelectorAll(".cost-project-row").length > 0,
+      projectRowsWithTokenContext: Array.from(document.querySelectorAll(".cost-project-row"))
+        .every((row) => Boolean(row.querySelector(".cost-project-token"))),
+      homepageCostMetaVisible: Boolean(document.querySelector(".cost-home-summary")),
       overlayVisible: Boolean(overlay && !overlay.hidden && overlay.offsetHeight > 0),
       listText,
       formName: document.getElementById("costPackageName")?.value || "",
@@ -239,6 +244,8 @@ app.whenReady().then(async () => {
   assert.equal(packageUiState.naturalMonthVisible, true, "natural-month cycle should update visible app state without restart");
   assert.equal(packageUiState.costAllocationVisible, true, "active package should show an available cost allocation");
   assert.equal(packageUiState.projectAllocationVisible, true, "cost allocation should include project rows");
+  assert.equal(packageUiState.projectRowsWithTokenContext, true, "top project cost rows should include token context");
+  assert.equal(packageUiState.homepageCostMetaVisible, true, "configured homepage should show active package and cycle summary");
   assert.equal(packageUiState.overlayVisible, true, "cost settings should remain visible for final screenshot");
 
   await new Promise((resolve) => setTimeout(resolve, 250));
@@ -273,6 +280,29 @@ app.whenReady().then(async () => {
   assert.equal(degradedState.costCycleStillVisible, true, "latest cost cycle should survive concurrent snapshot refreshes");
   assert.equal(degradedState.cycleSummaryStillVisible, true, "cost cycle form summary should stay on the latest cycle");
   assert.equal(degradedState.naturalMonthModeChecked, true, "cost cycle form mode should stay on the latest cycle");
+
+  const configuredHomepageState = await window.webContents.executeJavaScript(`(async () => {
+    document.getElementById("closeCostSettingsButton")?.click();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    return {
+      overlayHidden: Boolean(document.getElementById("costSettingsOverlay")?.hidden),
+      costAllocationVisible: Boolean(document.querySelector(".cost-estimate:not(.is-unavailable)")),
+      projectRowsWithTokenContext: Array.from(document.querySelectorAll(".cost-project-row"))
+        .every((row) => Boolean(row.querySelector(".cost-project-token"))),
+      homepageCostMetaVisible: Boolean(document.querySelector(".cost-home-summary")),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      scrollWidth: document.documentElement.scrollWidth,
+      scrollHeight: document.documentElement.scrollHeight
+    };
+  })()`);
+
+  assert.equal(configuredHomepageState.overlayHidden, true, "final screenshot should show the configured homepage, not the settings modal");
+  assert.equal(configuredHomepageState.costAllocationVisible, true, "configured homepage should show available cost allocation");
+  assert.equal(configuredHomepageState.projectRowsWithTokenContext, true, "configured homepage project rows should include token context");
+  assert.equal(configuredHomepageState.homepageCostMetaVisible, true, "configured homepage should show active package and cycle summary");
+  assert(configuredHomepageState.scrollWidth <= configuredHomepageState.viewportWidth, "configured dashboard should not have a horizontal scrollbar");
+  assert(configuredHomepageState.scrollHeight <= configuredHomepageState.viewportHeight, "configured dashboard should not have a vertical scrollbar");
 
   await window.webContents.executeJavaScript(`new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));

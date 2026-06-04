@@ -354,27 +354,38 @@ function renderCostEstimate(costEstimate) {
   if (!costEstimate || !costEstimate.available) {
     return `
       <div class="cost-estimate is-unavailable">
-        <p class="cost-estimate-label">分摊成本</p>
-        <p class="cost-estimate-main">成本估算不可用</p>
-        <p class="cost-estimate-sub">${escapeHtml(costUnavailableText(costEstimate?.reason))}</p>
+        <div>
+          <p class="cost-estimate-label">成本估算</p>
+          <p class="cost-estimate-main">成本估算不可用</p>
+          <p class="cost-estimate-sub">${escapeHtml(costUnavailableText(costEstimate?.reason))}</p>
+        </div>
+        <button class="cost-setup-entry" type="button" data-action="open-cost-settings">去设置成本套餐</button>
       </div>
     `;
   }
 
   const projects = costEstimate.projects.slice(0, 2);
+  const cycleText = formatCycleRange(costEstimate.cycle);
+  const packageText = `${costEstimate.packageName} ${formatCurrency(costEstimate.packageAmount, costEstimate.currency)}`;
   return `
     <div class="cost-estimate">
-      <div class="cost-estimate-head">
+      <div class="cost-home-summary">
         <div>
           <p class="cost-estimate-label">分摊成本</p>
           <p class="cost-estimate-main">${escapeHtml(formatCurrency(costEstimate.totalAllocatedCost, costEstimate.currency))}</p>
         </div>
-        <p class="cost-estimate-sub">周期 Token ${escapeHtml(formatTokenShort(costEstimate.cycleTotalTokens))}</p>
+        <div class="cost-home-meta">
+          <span>${escapeHtml(packageText)}</span>
+          <span>${escapeHtml(cycleText)}</span>
+        </div>
       </div>
       <div class="cost-project-list">
         ${projects.map((project) => `
           <div class="cost-project-row">
-            <span>${escapeHtml(project.project)}</span>
+            <span class="cost-project-main">
+              <span class="cost-project-name">${escapeHtml(project.project)}</span>
+              <small class="cost-project-token">${escapeHtml(formatTokenShort(project.tokens))} Token · ${escapeHtml(formatPercent(project.share * 100))}</small>
+            </span>
             <strong>${escapeHtml(formatCurrency(project.allocatedCost, costEstimate.currency))}</strong>
           </div>
         `).join("")}
@@ -955,6 +966,11 @@ renderSyncProgress({
 
 refreshButton.addEventListener("click", runManualRefresh);
 costSettingsButton.addEventListener("click", openCostSettings);
+appNode.addEventListener("click", (event) => {
+  if (event.target.closest("[data-action='open-cost-settings']")) {
+    openCostSettings();
+  }
+});
 closeCostSettingsButton.addEventListener("click", closeCostSettings);
 clearCostSettingsButton.addEventListener("click", clearCostSettings);
 newCostPackageButton.addEventListener("click", () => fillCostPackageForm(null));
