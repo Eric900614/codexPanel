@@ -434,6 +434,30 @@ function renderPushedSnapshot(snapshot) {
   }
 }
 
+async function hydrateSnapshot() {
+  if (manualRefreshRunning) return;
+
+  try {
+    const snapshot = hasBridge && typeof window.codexPanel.getSnapshot === "function"
+      ? await window.codexPanel.getSnapshot()
+      : buildMockSnapshot();
+    if (manualRefreshRunning) return;
+    renderPushedSnapshot(snapshot);
+    renderSyncProgress(snapshot.sync);
+  } catch (error) {
+    liveStatusNode.textContent = "读取失败";
+    liveStatusNode.classList.add("error");
+    if (!latestSnapshot) {
+      appNode.innerHTML = `
+        <section class="panel error-state">
+          <h2>读取失败</h2>
+          <p>${escapeHtml(error.message || error)}</p>
+        </section>
+      `;
+    }
+  }
+}
+
 async function runManualRefresh() {
   if (manualRefreshRunning) return;
 
@@ -489,11 +513,8 @@ if (hasBridge && typeof window.codexPanel.onSyncProgress === "function") {
 
 if (hasBridge && typeof window.codexPanel.onSnapshot === "function") {
   unsubscribeSnapshot = window.codexPanel.onSnapshot(renderPushedSnapshot);
-} else {
-  const snapshot = buildMockSnapshot();
-  renderPushedSnapshot(snapshot);
-  renderSyncProgress(snapshot.sync);
 }
+hydrateSnapshot();
 
 window.addEventListener("beforeunload", () => {
   if (unsubscribeSnapshot) unsubscribeSnapshot();

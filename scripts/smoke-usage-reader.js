@@ -263,11 +263,16 @@ const synchronization = new UsageSynchronization({
   publishProgress: (progress) => pushedProgressEvents.push(progress)
 });
 
-synchronization.start();
+const startupSnapshot = synchronization.getSnapshot();
+assert.equal(startupSnapshot.marker, "snapshot-1");
 assert.equal(pushedSnapshots.length, 1);
 assert.equal(pushedSnapshots[0].marker, "snapshot-1");
 assert(pushedProgressEvents.some((event) => event.state === "scanning"));
 assert(pushedProgressEvents.some((event) => event.state === "idle"));
+
+const cachedStartupSnapshot = synchronization.getSnapshot();
+assert.equal(cachedStartupSnapshot.marker, "snapshot-1");
+assert.equal(pushedSnapshots.length, 1);
 
 synchronization.refreshFull();
 assert.equal(pushedSnapshots.length, 2);

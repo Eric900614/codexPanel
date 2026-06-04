@@ -7,6 +7,10 @@ class UsageSynchronization {
   }
 
   start() {
+    if (this.latestSnapshot) {
+      this.publishSnapshot(this.latestSnapshot);
+      return this.latestSnapshot;
+    }
     return this.refreshFull();
   }
 
@@ -21,6 +25,10 @@ class UsageSynchronization {
 
   getLatestSnapshot() {
     return this.latestSnapshot;
+  }
+
+  getSnapshot() {
+    return this.latestSnapshot || this.start();
   }
 }
 

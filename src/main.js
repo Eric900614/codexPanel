@@ -49,7 +49,7 @@ function createWindow() {
   return window;
 }
 
-ipcMain.handle("usage:getSnapshot", () => synchronization.getLatestSnapshot() || reader.getSnapshot());
+ipcMain.handle("usage:getSnapshot", () => synchronization.getSnapshot());
 
 ipcMain.handle("usage:refreshFull", () => synchronization.refreshFull());
 

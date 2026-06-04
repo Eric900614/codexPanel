@@ -29,7 +29,7 @@ function publishProgress(progress) {
   });
 }
 
-ipcMain.handle("usage:getSnapshot", () => synchronization.getLatestSnapshot() || reader.getSnapshot());
+ipcMain.handle("usage:getSnapshot", () => synchronization.getSnapshot());
 ipcMain.handle("usage:refreshFull", () => synchronization.refreshFull());
 ipcMain.handle("usage:getConfig", () => ({
   codexHome: getDefaultCodexHome(),
