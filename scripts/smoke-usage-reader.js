@@ -10,7 +10,7 @@ function writeJsonl(filePath, events) {
   fs.writeFileSync(filePath, events.map((event) => JSON.stringify(event)).join("\n"), "utf8");
 }
 
-function tokenCountEvent(timestamp, totalTokens, lastTokens, model = "gpt-5.5") {
+function tokenCountEvent(timestamp, totalTokens, lastTokens, model = "gpt-5.5", rateLimits = null) {
   return {
     timestamp,
     type: "event_msg",
@@ -33,7 +33,7 @@ function tokenCountEvent(timestamp, totalTokens, lastTokens, model = "gpt-5.5") 
           total_tokens: lastTokens
         }
       },
-      rate_limits: {
+      rate_limits: rateLimits || {
         primary: { used_percent: 12, resets_at: Math.floor((Date.now() + 60 * 60 * 1000) / 1000) },
         secondary: { used_percent: 34, resets_at: Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000) }
       }
@@ -150,6 +150,53 @@ assert.equal(snapshot.temporaryErrors.length, 1);
 assert(progressEvents.some((event) => event.state === "scanning"));
 assert(progressEvents.some((event) => event.phase === "reconciling"));
 assert(progressEvents.some((event) => event.state === "idle"));
+
+const rateLimitFixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-panel-rate-limits-"));
+const rateLimitSessionsRoot = path.join(rateLimitFixtureRoot, "sessions");
+const rateLimitResetAt = Math.floor((Date.now() + 3 * 60 * 60 * 1000) / 1000);
+const rateLimitSecondaryResetAt = Math.floor((Date.now() + 6 * 24 * 60 * 60 * 1000) / 1000);
+writeJsonl(path.join(rateLimitSessionsRoot, "2026", "06", "rollout-a-b-c-higher.jsonl"), [
+  {
+    timestamp: new Date(Date.now() - 2000).toISOString(),
+    type: "session_meta",
+    payload: { id: "higher", source: "electron", timestamp: new Date(Date.now() - 2000).toISOString() }
+  },
+  tokenCountEvent(new Date(Date.now() - 1000).toISOString(), 1000, 1000, "gpt-5.5", {
+    primary: { used_percent: 30, resets_at: rateLimitResetAt },
+    secondary: { used_percent: 10, resets_at: rateLimitSecondaryResetAt }
+  })
+]);
+writeJsonl(path.join(rateLimitSessionsRoot, "2026", "06", "rollout-a-b-c-older-window.jsonl"), [
+  {
+    timestamp: new Date(Date.now() - 1500).toISOString(),
+    type: "session_meta",
+    payload: { id: "older-window", source: "electron", timestamp: new Date(Date.now() - 1500).toISOString() }
+  },
+  tokenCountEvent(new Date(Date.now() - 500).toISOString(), 1000, 1000, "gpt-5.5", {
+    primary: { used_percent: 80, resets_at: rateLimitResetAt + 60 * 60 },
+    secondary: { used_percent: 99, resets_at: rateLimitSecondaryResetAt + 60 * 60 }
+  })
+]);
+writeJsonl(path.join(rateLimitSessionsRoot, "2026", "06", "rollout-a-b-c-lower-later.jsonl"), [
+  {
+    timestamp: new Date().toISOString(),
+    type: "session_meta",
+    payload: { id: "lower-later", source: "electron", timestamp: new Date().toISOString() }
+  },
+  tokenCountEvent(new Date().toISOString(), 1000, 1000, "gpt-5.5", {
+    primary: { used_percent: 26, resets_at: rateLimitResetAt },
+    secondary: { used_percent: 9, resets_at: rateLimitSecondaryResetAt }
+  })
+]);
+
+const rateLimitSnapshot = new UsageReader({
+  codexHome: rateLimitFixtureRoot,
+  sessionsRoot: rateLimitSessionsRoot
+}).reconcileFull();
+assert.equal(rateLimitSnapshot.rateLimits.primary.used_percent, 30);
+assert.equal(rateLimitSnapshot.rateLimits.primary.resets_at, rateLimitResetAt);
+assert.equal(rateLimitSnapshot.rateLimits.secondary.used_percent, 10);
+assert.equal(rateLimitSnapshot.rateLimits.secondary.resets_at, rateLimitSecondaryResetAt);
 
 const parsingEvents = progressEvents.filter((event) => event.phase === "reconciling");
 assert(parsingEvents.length >= 2);

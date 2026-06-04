@@ -100,6 +100,7 @@ function createSession(filePath, stat) {
     lastTokens: 0,
     contextWindow: 0,
     latestRateLimits: null,
+    latestRateLimitsAt: 0,
     tokenEvents: [],
     parseErrorCount: 0
   };
@@ -144,6 +145,7 @@ function applySessionEvent(session, event, stat) {
     session.lastTokens = last.total_tokens || 0;
     session.contextWindow = info.model_context_window || session.contextWindow;
     session.latestRateLimits = payload.rate_limits || session.latestRateLimits;
+    session.latestRateLimitsAt = payload.rate_limits ? tokenEventTime : session.latestRateLimitsAt;
     session.tokenEvents.push({
       timestamp: tokenEventTime,
       totalTokens: total.total_tokens || 0,
@@ -501,10 +503,76 @@ function buildReadErrorSession(filePath, stat, error, cached) {
   };
 }
 
-function latestRateLimit(sessions) {
+function latestRateLimitEnvelope(sessions) {
   return sessions
     .filter((session) => session.latestRateLimits)
-    .sort((a, b) => b.updatedAt - a.updatedAt)[0]?.latestRateLimits || null;
+    .sort((a, b) => (b.latestRateLimitsAt || b.updatedAt || 0) - (a.latestRateLimitsAt || a.updatedAt || 0))[0] || null;
+}
+
+function isUsableLimit(limit) {
+  return limit && Number.isFinite(limit.used_percent);
+}
+
+function limitExpiresAfter(limit, now) {
+  if (!Number.isFinite(limit?.resets_at)) return true;
+  return limit.resets_at * 1000 > now;
+}
+
+function rateLimitEnvelopeMatches(candidateRateLimits, anchorRateLimits) {
+  if (!anchorRateLimits) return true;
+  if (anchorRateLimits.limit_id && candidateRateLimits?.limit_id && candidateRateLimits.limit_id !== anchorRateLimits.limit_id) {
+    return false;
+  }
+  if (anchorRateLimits.plan_type && candidateRateLimits?.plan_type && candidateRateLimits.plan_type !== anchorRateLimits.plan_type) {
+    return false;
+  }
+  return true;
+}
+
+function mostUsedLimit(candidates) {
+  return candidates.sort((a, b) => (
+    (b.limit.used_percent || 0) - (a.limit.used_percent || 0) ||
+    (b.observedAt || 0) - (a.observedAt || 0)
+  ))[0].limit;
+}
+
+function pickConservativeLimit(sessions, key, anchorRateLimits, now) {
+  const anchorLimit = anchorRateLimits?.[key];
+  const candidates = sessions
+    .map((session) => ({
+      limit: session.latestRateLimits?.[key],
+      observedAt: session.latestRateLimitsAt || session.updatedAt || 0,
+      rateLimits: session.latestRateLimits
+    }))
+    .filter((candidate) => (
+      isUsableLimit(candidate.limit) &&
+      rateLimitEnvelopeMatches(candidate.rateLimits, anchorRateLimits)
+    ));
+
+  if (candidates.length === 0) return null;
+
+  if (Number.isFinite(anchorLimit?.resets_at)) {
+    const sameWindowCandidates = candidates.filter((candidate) => candidate.limit.resets_at === anchorLimit.resets_at);
+    if (sameWindowCandidates.length > 0) return mostUsedLimit(sameWindowCandidates);
+  }
+
+  const activeCandidates = candidates.filter((candidate) => limitExpiresAfter(candidate.limit, now));
+  if (activeCandidates.length === 0) {
+    return candidates.sort((a, b) => (b.observedAt || 0) - (a.observedAt || 0))[0].limit;
+  }
+
+  return mostUsedLimit(activeCandidates);
+}
+
+function latestRateLimit(sessions, now = Date.now()) {
+  const envelope = latestRateLimitEnvelope(sessions);
+  if (!envelope) return null;
+
+  return {
+    ...envelope.latestRateLimits,
+    primary: pickConservativeLimit(sessions, "primary", envelope.latestRateLimits, now) || envelope.latestRateLimits.primary,
+    secondary: pickConservativeLimit(sessions, "secondary", envelope.latestRateLimits, now) || envelope.latestRateLimits.secondary
+  };
 }
 
 function buildDistribution(map) {
