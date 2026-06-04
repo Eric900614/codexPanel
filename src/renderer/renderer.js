@@ -45,24 +45,61 @@ function progressPercent(progress) {
   return progress.state === "scanning" ? 12 : 0;
 }
 
+function syncPhaseLabel(progress) {
+  if (!progress) return "扫描";
+  if (progress.phase === "error") return "重试";
+  if (progress.state === "scanning") return "扫描";
+  if (progress.state === "reconciling" && progress.phase === "tailing") return "校准";
+  if (progress.state === "reconciling") return "解析";
+  if (progress.state === "idle" && (progress.errorCount || 0) > 0) return "降级";
+  if (progress.state === "idle") return "已同步";
+  return "同步";
+}
+
 function formatSyncMessage(progress) {
+  const phase = syncPhaseLabel(progress);
   if (progress.phase === "error") {
-    return progress.message || "同步失败";
+    return `${phase} · ${progress.message || "暂时读不到文件"}`;
   }
   if (progress.state === "scanning") {
     if (Number.isFinite(progress.totalFileCount)) {
-      return `找到 ${formatRaw(progress.totalFileCount)} 个文件`;
+      return `${phase} · 找到 ${formatRaw(progress.totalFileCount)} 个文件`;
     }
-    return "正在查找会话文件";
+    return `${phase} · 正在查找会话文件`;
   }
   if (progress.state === "reconciling") {
-    return `正在同步 ${formatRaw(progress.processedFileCount)} / ${formatRaw(progress.totalFileCount)} 个文件`;
+    return `${phase} · ${formatRaw(progress.processedFileCount)} / ${formatRaw(progress.totalFileCount)} 个文件`;
   }
   if (progress.state === "idle" && progress.errorCount > 0) {
-    return `同步完成，${formatRaw(progress.errorCount)} 个文件暂时读不到`;
+    return `${phase} · ${formatRaw(progress.errorCount)} 个文件暂时读不到，保留旧数据`;
   }
-  if (progress.state === "idle") return "同步完成";
-  return progress.message || "同步中";
+  if (progress.state === "idle") return `${phase} · 正在监听变化`;
+  return progress.message || `${phase} · 正在同步`;
+}
+
+function formatSyncCount(progress) {
+  if (!progress) return "";
+  if (Number.isFinite(progress.totalFileCount)) {
+    return `${formatRaw(progress.processedFileCount)} / ${formatRaw(progress.totalFileCount)}`;
+  }
+  return "";
+}
+
+function renderStatusPill(progress, snapshot = latestSnapshot) {
+  if (!liveStatusNode) return;
+
+  const phase = syncPhaseLabel(progress);
+  const errorCount = progress?.errorCount || snapshot?.sync?.errorCount || 0;
+  if (errorCount > 0) {
+    liveStatusNode.textContent = `${phase} · ${formatRaw(errorCount)} 个临时错误`;
+  } else if (Number.isFinite(progress?.totalFileCount)) {
+    liveStatusNode.textContent = `${phase} · ${formatRaw(progress.processedFileCount)} / ${formatRaw(progress.totalFileCount)}`;
+  } else if (snapshot) {
+    liveStatusNode.textContent = `${phase} · ${formatRaw(snapshot.scannedFileCount)} 个文件`;
+  } else {
+    liveStatusNode.textContent = `${phase} · 准备同步`;
+  }
+  liveStatusNode.classList.toggle("error", errorCount > 0 || progress?.phase === "error");
 }
 
 function renderSyncProgress(progress) {
@@ -73,18 +110,13 @@ function renderSyncProgress(progress) {
   syncProgressNode.classList.toggle("is-idle", progress.state === "idle");
   syncProgressNode.classList.toggle("has-errors", (progress.errorCount || 0) > 0);
   syncProgressMessageNode.textContent = formatSyncMessage(progress);
-  syncProgressCountNode.textContent = Number.isFinite(progress.totalFileCount)
-    ? `${formatRaw(progress.processedFileCount)} / ${formatRaw(progress.totalFileCount)}`
-    : "";
+  syncProgressCountNode.textContent = formatSyncCount(progress);
   syncProgressBarNode.style.width = `${percent}%`;
+  renderStatusPill(progress);
 }
 
 function renderLiveStatus(snapshot) {
-  const errorCount = snapshot.sync?.errorCount || 0;
-  liveStatusNode.textContent = errorCount > 0
-    ? `实时 · ${formatRaw(errorCount)} 个临时错误`
-    : `实时 · ${formatRaw(snapshot.scannedFileCount)} 个文件`;
-  liveStatusNode.classList.toggle("error", errorCount > 0);
+  renderStatusPill(snapshot.sync, snapshot);
 }
 
 function formatPercent(value) {
@@ -500,6 +532,15 @@ async function runManualRefresh() {
     refreshButton.disabled = false;
   }
 }
+
+renderSyncProgress({
+  state: "scanning",
+  phase: "scanning",
+  processedFileCount: 0,
+  totalFileCount: null,
+  message: "Preparing sync.",
+  errorCount: 0
+});
 
 refreshButton.addEventListener("click", runManualRefresh);
 openFolderButton.addEventListener("click", async () => {
