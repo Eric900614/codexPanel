@@ -102,6 +102,8 @@ app.whenReady().then(async () => {
       visible: Boolean(overlay && !overlay.hidden && overlay.offsetHeight > 0),
       hasPackageList: Boolean(document.getElementById("costPackageList")),
       hasCurrencyInput: Boolean(document.getElementById("costPackageCurrency")),
+      hasCycleMode: Boolean(document.getElementById("costCycleModeCustom") && document.getElementById("costCycleModeNaturalMonth")),
+      hasCycleDates: Boolean(document.getElementById("costCycleStartDate") && document.getElementById("costCycleEndDate")),
       appTextLength: appText.length
     };
   })()`);
@@ -109,6 +111,8 @@ app.whenReady().then(async () => {
   assert.equal(settingsUiState.visible, true, "cost settings should open from the toolbar");
   assert.equal(settingsUiState.hasPackageList, true, "cost settings should manage a package list");
   assert.equal(settingsUiState.hasCurrencyInput, true, "cost settings should allow editing package currency");
+  assert.equal(settingsUiState.hasCycleMode, true, "cost settings should show cost cycle mode controls");
+  assert.equal(settingsUiState.hasCycleDates, true, "cost settings should allow editing custom cost cycle dates");
   assert(settingsUiState.appTextLength > 80, "token dashboard should remain rendered while settings are open");
 
   const packageUiState = await window.webContents.executeJavaScript(`(async () => {
@@ -158,16 +162,34 @@ app.whenReady().then(async () => {
 
     setValue("costPackageAmount", "-1");
     await submit();
+    const invalidPackageMessage = document.getElementById("costSettingsMessage")?.innerText || "";
+
+    setValue("costPackageAmount", "790");
+    document.getElementById("costCycleStartDate").value = "2026-07-01";
+    document.getElementById("costCycleEndDate").value = "2026-06-01";
+    await submit();
+    const invalidCycleMessage = document.getElementById("costSettingsMessage")?.innerText || "";
+
+    document.getElementById("costCycleStartDate").value = "2026-06-01";
+    document.getElementById("costCycleEndDate").value = "2026-06-30";
+    await submit();
+
+    document.getElementById("costCycleModeNaturalMonth").click();
+    document.getElementById("costCycleModeNaturalMonth").dispatchEvent(new Event("change", { bubbles: true }));
+    await wait();
 
     const appText = document.getElementById("app")?.innerText || "";
     const listText = document.getElementById("costPackageList")?.innerText || "";
     const messageText = document.getElementById("costSettingsMessage")?.innerText || "";
+    const cycleSummaryText = document.getElementById("costCycleSummary")?.innerText || "";
     const overlay = document.getElementById("costSettingsOverlay");
     return {
       activeSummaryVisible: appText.includes("20x Pro"),
       inactiveEditPreservedActive: appTextAfterInactiveEdit.includes("20x Pro"),
       listShowsBothPackages: listText.includes("5x") && listText.includes("20x Pro"),
-      invalidInputRejected: messageText.length > 0 && appText.includes("20x Pro"),
+      invalidInputRejected: invalidPackageMessage.length > 0 && appText.includes("20x Pro"),
+      invalidCycleRejected: invalidCycleMessage.length > 0,
+      naturalMonthVisible: appText.includes("自然月") && cycleSummaryText.includes("自然月"),
       overlayVisible: Boolean(overlay && !overlay.hidden && overlay.offsetHeight > 0),
       listText,
       formName: document.getElementById("costPackageName")?.value || "",
@@ -178,6 +200,8 @@ app.whenReady().then(async () => {
   assert.equal(packageUiState.inactiveEditPreservedActive, true, "editing an inactive package should not switch the active package");
   assert.equal(packageUiState.listShowsBothPackages, true, "settings should show created and edited packages");
   assert.equal(packageUiState.invalidInputRejected, true, "invalid package input should not corrupt saved settings");
+  assert.equal(packageUiState.invalidCycleRejected, true, "invalid cost cycle dates should show clear feedback");
+  assert.equal(packageUiState.naturalMonthVisible, true, "natural-month cycle should update visible app state without restart");
   assert.equal(packageUiState.overlayVisible, true, "cost settings should remain visible for final screenshot");
 
   window.webContents.send("usage:syncProgress", {

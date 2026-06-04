@@ -61,6 +61,29 @@
           <span>币种</span>
           <input id="costPackageCurrency" type="text" autocomplete="off" maxlength="8" placeholder="CNY">
         </label>
+        <section class="cycle-settings" aria-label="成本周期">
+          <div class="cycle-mode">
+            <label>
+              <input id="costCycleModeCustom" type="radio" name="costCycleMode" value="custom">
+              <span>自定义周期</span>
+            </label>
+            <label>
+              <input id="costCycleModeNaturalMonth" type="radio" name="costCycleMode" value="naturalMonth">
+              <span>自然月</span>
+            </label>
+          </div>
+          <div class="cycle-date-grid">
+            <label class="field-row">
+              <span>开始日期</span>
+              <input id="costCycleStartDate" type="date">
+            </label>
+            <label class="field-row">
+              <span>结束日期</span>
+              <input id="costCycleEndDate" type="date">
+            </label>
+          </div>
+          <p id="costCycleSummary" class="cycle-summary"></p>
+        </section>
         <p id="costSettingsMessage" class="form-message"></p>
         <div class="modal-actions">
           <button id="newCostPackageButton" class="ghost-button" type="button">新建</button>

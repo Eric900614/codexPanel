@@ -113,13 +113,23 @@ const emptyCostSettings = costStore.getSettings();
 assert.equal(emptyCostSettings.version, 1);
 assert.equal(emptyCostSettings.configured, false);
 assert.equal(emptyCostSettings.costPackage, null);
+assert.equal(emptyCostSettings.costCycle.mode, "custom");
+assert.match(emptyCostSettings.costCycle.startDate, /^\d{4}-\d{2}-\d{2}$/);
+assert.match(emptyCostSettings.costCycle.endDate, /^\d{4}-\d{2}-\d{2}$/);
+assert.equal(emptyCostSettings.costCycle.effectiveStartDate, emptyCostSettings.costCycle.startDate);
+assert.equal(emptyCostSettings.costCycle.effectiveEndDate, emptyCostSettings.costCycle.endDate);
 
 const savedCostSettings = costStore.saveSettings({
   packages: [
     { id: "package-5x", name: "5x", amount: 780, currency: "CNY" },
     { id: "package-20x", name: "20x", amount: 1280, currency: "CNY" }
   ],
-  activePackageId: "package-20x"
+  activePackageId: "package-20x",
+  costCycle: {
+    mode: "custom",
+    startDate: "2026-06-01",
+    endDate: "2026-06-30"
+  }
 });
 assert.equal(savedCostSettings.configured, true);
 assert.equal(savedCostSettings.packages.length, 2);
@@ -128,6 +138,9 @@ assert.equal(savedCostSettings.activePackage.name, "20x");
 assert.equal(savedCostSettings.activePackage.amount, 1280);
 assert.equal(savedCostSettings.costPackage.name, "20x");
 assert.equal(savedCostSettings.costPackage.amountCny, 1280);
+assert.equal(savedCostSettings.costCycle.mode, "custom");
+assert.equal(savedCostSettings.costCycle.effectiveStartDate, "2026-06-01");
+assert.equal(savedCostSettings.costCycle.effectiveEndDate, "2026-06-30");
 assert(fs.existsSync(path.join(costConfigDir, "cost-settings.json")));
 assert.equal(fs.existsSync(path.join(costSessionsRoot, "cost-settings.json")), false);
 assert.deepEqual(fs.readdirSync(costSessionsRoot), []);
@@ -145,13 +158,35 @@ assert.throws(() => costStore.saveSettings({
   activePackageId: "bad-currency"
 }));
 assert.deepEqual(new CostSettingsStore({ configDir: costConfigDir }).getSettings(), savedCostSettings);
+assert.throws(() => costStore.saveSettings({
+  packages: savedCostSettings.packages,
+  activePackageId: savedCostSettings.activePackageId,
+  costCycle: {
+    mode: "custom",
+    startDate: "2026-07-01",
+    endDate: "2026-06-01"
+  }
+}));
+assert.deepEqual(new CostSettingsStore({ configDir: costConfigDir }).getSettings(), savedCostSettings);
+
+const naturalMonthSettings = costStore.saveSettings({
+  packages: savedCostSettings.packages,
+  activePackageId: savedCostSettings.activePackageId,
+  costCycle: {
+    mode: "naturalMonth"
+  }
+});
+assert.equal(naturalMonthSettings.costCycle.mode, "naturalMonth");
+assert.match(naturalMonthSettings.costCycle.effectiveStartDate, /^\d{4}-\d{2}-01$/);
+assert.match(naturalMonthSettings.costCycle.effectiveEndDate, /^\d{4}-\d{2}-\d{2}$/);
 
 const editedCostSettings = costStore.saveSettings({
   packages: [
     { id: "package-5x", name: "5x Plus", amount: 880, currency: "CNY" },
     { id: "package-20x", name: "20x", amount: 1280, currency: "CNY" }
   ],
-  activePackageId: "package-5x"
+  activePackageId: "package-5x",
+  costCycle: naturalMonthSettings.costCycle
 });
 assert.equal(editedCostSettings.activePackageId, "package-5x");
 assert.equal(editedCostSettings.activePackage.name, "5x Plus");
